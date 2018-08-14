@@ -7,120 +7,12 @@ import (
 	"github.com/dedis/kyber"
 	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/kyber/sign/bls"
-	"github.com/dedis/kyber/sign/cosi"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
 	"github.com/dedis/onet/simul/monitor"
 )
 
-/* Helper functions for FtCoSi */
-// aggregateCommitments returns an aggregated commitment and an aggregated mask
-func aggregateCommitments(s cosi.Suite, publics []kyber.Point,
-	structCommitments []StructCommitment) (kyber.Point, *cosi.Mask, error) {
-
-	if publics == nil {
-		return nil, nil, fmt.Errorf("publics should not be nil, but is")
-	} else if structCommitments == nil {
-		return nil, nil, fmt.Errorf("structCommitments should not be nil, but is")
-	}
-
-	//extract lists of commitments and masks
-	var commitments []kyber.Point
-	var masks [][]byte
-	for _, c := range structCommitments {
-		commitments = append(commitments, c.CoSiCommitment)
-		masks = append(masks, c.Mask)
-	}
-
-	//create final aggregated mask
-	finalMask, err := cosi.NewMask(s, publics, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	aggCommitment := s.Point().Null()
-	aggMask := finalMask.Mask()
-	if len(masks) > 0 {
-		//aggregate commitments and masks
-		aggCommitment, aggMask, err =
-			cosi.AggregateCommitments(s, commitments, masks)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-
-	err = finalMask.SetMask(aggMask)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return aggCommitment, finalMask, nil
-}
-
-// generateResponse generates a personal response based on the secret
-// and returns the aggregated response of all children and the node
-func aggregateResponses(s cosi.Suite, structResponses []StructResponse) (kyber.Scalar, error) {
-	if structResponses == nil {
-		return nil, fmt.Errorf("StructResponse should not be nil, but is")
-	}
-
-	// extract lists of responses
-	var responses []kyber.Scalar
-	for _, c := range structResponses {
-		coSiResponse, err := signedByteSliceToScalar(s, c.CoSiReponse)
-		if err != nil {
-			return nil, fmt.Errorf("Unable to Unmarshall response: %s", err)
-		}
-		responses = append(responses, coSiResponse)
-	}
-
-	// aggregate responses
-	aggResponse, err := cosi.AggregateResponses(s, responses)
-	if err != nil {
-		log.Lvl3("failed to create aggregate response")
-		return nil, err
-	}
-
-	log.Lvl3("done aggregating responses with total of", len(responses), "responses")
-	return aggResponse, nil
-}
-
-// GetSubleaderIDs returns a slice of subleaders for tree
-func GetSubleaderIDs(tree *onet.Tree, root, nNodes, nSubtrees int) ([]network.ServerIdentityID, error) {
-	exampleTrees, err := genTrees(tree.Roster, root, nNodes, nSubtrees)
-	if err != nil {
-		return nil, fmt.Errorf("error in creation of example tree:%s", err)
-	}
-	subleadersIDs := make([]network.ServerIdentityID, 0)
-	for _, subtree := range exampleTrees {
-		if len(subtree.Root.Children) < 1 {
-			return nil, fmt.Errorf("expected a subtree with at least a subleader, but found none")
-		}
-		subleadersIDs = append(subleadersIDs, subtree.Root.Children[0].ServerIdentity.ID)
-	}
-	return subleadersIDs, nil
-}
-
-// GetLeafsIDs returns a slice of leaves for tree
-func GetLeafsIDs(tree *onet.Tree, root, nNodes, nSubtrees int) ([]network.ServerIdentityID, error) {
-	exampleTrees, err := genTrees(tree.Roster, root, nNodes, nSubtrees)
-	if err != nil {
-		return nil, fmt.Errorf("error in creation of example tree:%s", err)
-	}
-	leafsIDs := make([]network.ServerIdentityID, 0)
-	for _, subtree := range exampleTrees {
-		if len(subtree.Root.Children) < 1 {
-			return nil, fmt.Errorf("expected a subtree with at least a subleader, but found none")
-		}
-		for _, leaf := range subtree.Root.Children[0].Children {
-			leafsIDs = append(leafsIDs, leaf.ServerIdentity.ID)
-		}
-	}
-	return leafsIDs, nil
-}
-
-/* Helper functions for BLS CoSi */
 // Sign the message with this node and aggregates with all child signatures (in structResponses)
 // Also aggregates the child bitmasks
 func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyber.Point, structResponses []StructResponse,
@@ -222,25 +114,6 @@ func PointToByteSlice(ps pairing.Suite, sig kyber.Point) ([]byte, error) {
 	return byteSig, nil
 }
 
-func signedByteSliceToScalar(s cosi.Suite, sig []byte) (kyber.Scalar, error) {
-	scalar := s.Scalar().Zero()
-
-	if err := scalar.UnmarshalBinary(sig); err != nil {
-		return nil, err
-	}
-
-	return scalar, nil
-}
-
-func ScalarToByteSlice(s cosi.Suite, sig kyber.Scalar) ([]byte, error) {
-	byteSig, err := sig.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-
-	return byteSig, nil
-}
-
 // AggregateResponses returns the sum of given responses.
 // TODO add mask data?
 func aggregateSignatures(suite pairing.Suite, signatures []kyber.Point, masks [][]byte) (sum kyber.Point, sig []byte, err error) {
@@ -306,4 +179,38 @@ func Verify(suite pairing.Suite, publics []kyber.Point, message, sig []byte, pol
 	}
 
 	return nil
+}
+
+// GetLeafsIDs returns a slice of leaves for tree
+func GetLeafsIDs(tree *onet.Tree, root, nNodes, nSubtrees int) ([]network.ServerIdentityID, error) {
+	exampleTrees, err := genTrees(tree.Roster, root, nNodes, nSubtrees)
+	if err != nil {
+		return nil, fmt.Errorf("error in creation of example tree:%s", err)
+	}
+	leafsIDs := make([]network.ServerIdentityID, 0)
+	for _, subtree := range exampleTrees {
+		if len(subtree.Root.Children) < 1 {
+			return nil, fmt.Errorf("expected a subtree with at least a subleader, but found none")
+		}
+		for _, leaf := range subtree.Root.Children[0].Children {
+			leafsIDs = append(leafsIDs, leaf.ServerIdentity.ID)
+		}
+	}
+	return leafsIDs, nil
+}
+
+// GetSubleaderIDs returns a slice of subleaders for tree
+func GetSubleaderIDs(tree *onet.Tree, root, nNodes, nSubtrees int) ([]network.ServerIdentityID, error) {
+	exampleTrees, err := genTrees(tree.Roster, root, nNodes, nSubtrees)
+	if err != nil {
+		return nil, fmt.Errorf("error in creation of example tree:%s", err)
+	}
+	subleadersIDs := make([]network.ServerIdentityID, 0)
+	for _, subtree := range exampleTrees {
+		if len(subtree.Root.Children) < 1 {
+			return nil, fmt.Errorf("expected a subtree with at least a subleader, but found none")
+		}
+		subleadersIDs = append(subleadersIDs, subtree.Root.Children[0].ServerIdentity.ID)
+	}
+	return subleadersIDs, nil
 }

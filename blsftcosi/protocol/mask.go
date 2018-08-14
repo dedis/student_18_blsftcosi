@@ -3,12 +3,14 @@ package protocol
 import (
 	"errors"
 	"fmt"
-	"reflect"
 
 	"github.com/dedis/kyber"
 	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/onet/log"
+
 )
+
+
 
 // Mask represents a cosigning participation bitmask.
 type Mask struct {
@@ -22,7 +24,7 @@ type Mask struct {
 // it is present in the list of keys and sets the corresponding index in the
 // bitmask to 1 (enabled).
 func NewMask(suite pairing.Suite, publics []kyber.Point, myKey kyber.Point) (*Mask, error) {
-	log.Lvl2("newMask() %s", reflect.TypeOf(publics))
+	log.Lvl2("newMask() ")
 	m := &Mask{
 		publics: publics,
 	}
@@ -35,7 +37,6 @@ func NewMask(suite pairing.Suite, publics []kyber.Point, myKey kyber.Point) (*Ma
 			if key.Equal(myKey) {
 				log.Lvl2("FOUND", myKey)
 				m.SetBit(i, true)
-				log.Lvl2("Done", myKey)
 				found = true
 				break
 			} else {
@@ -97,13 +98,11 @@ func (m *Mask) SetBit(i int, enable bool) error {
 	log.Lvl2("msk", msk)
 	log.Lvl2("m.mask[byt]", m.mask[byt])
 	if ((m.mask[byt] & msk) == 0) && enable {
-		log.Lvl2("In 1st if")
 		m.mask[byt] ^= msk // flip bit in mask from 0 to 1
 		m.AggregatePublic.Add(m.AggregatePublic, m.publics[i])
 		log.Lvl2("changed m.mask[byt]", m.mask[byt])
 	}
 	if ((m.mask[byt] & msk) != 0) && !enable {
-		log.Lvl2("In 2nd if")
 		m.mask[byt] ^= msk // flip bit in mask from 1 to 0
 		m.AggregatePublic.Sub(m.AggregatePublic, m.publics[i])
 	}
@@ -202,3 +201,4 @@ func NewThresholdPolicy(thold int) *ThresholdPolicy {
 func (p ThresholdPolicy) Check(m *Mask) bool {
 	return m.CountEnabled() >= p.thold
 }
+

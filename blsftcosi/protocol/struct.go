@@ -1,99 +1,57 @@
+
 package protocol
 
-/*
-Struct holds the messages that will be sent around in the protocol. You have
-to define each message twice: once the actual message, and a second time
-with the `*onet.TreeNode` embedded. The latter is used in the handler-function
-so that it can find out who sent the message.
-*/
-
 import (
-	"crypto/cipher"
-	"crypto/sha512"
+	"fmt"
 	"hash"
 	"time"
+	"crypto/cipher"
+	"crypto/sha512"
 
+	"github.com/dedis/kyber/pairing"	
 	"github.com/dedis/kyber"
-	"github.com/dedis/kyber/group/edwards25519"
-	"github.com/dedis/kyber/sign/cosi"
-	"github.com/dedis/kyber/util/random"
 	"github.com/dedis/onet"
 )
 
 // DefaultProtocolName can be used from other packages to refer to this protocol.
 // If this name is used, then the suite used to verify signatures must be
 // the default cothority.Suite.
-const DefaultProtocolName = "ftCoSiProtoDefault"
+const DefaultProtocolName = "blsftCoSiProtoDefault"
 
 // DefaultSubProtocolName the name of the default sub protocol, started by the
 // main protocol.
-const DefaultSubProtocolName = "ftSubCoSiProtoDefault"
+const DefaultSubProtocolName = "blsftSubCoSiProtoDefault"
 
-type ftCosiSuite struct {
-	cosi.Suite
+type blsftCosiSuite struct {
+	pairing.Suite
 	r cipher.Stream
 }
 
-func (m *ftCosiSuite) Hash() hash.Hash {
-	return sha512.New()
+func (m *blsftCosiSuite) Hash() hash.Hash {
+	return sha512.New() // TODO change hash?
 }
 
-func (m *ftCosiSuite) RandomStream() cipher.Stream {
+func (m *blsftCosiSuite) RandomStream() cipher.Stream {
 	return m.r
 }
 
-// EdDSACompatibleCosiSuite is a custom suite made to be compatible with eddsa because
-// cothority.Suite uses sha256 but EdDSA uses sha512.
-var EdDSACompatibleCosiSuite = &ftCosiSuite{edwards25519.NewBlakeSHA256Ed25519(), random.New()}
-
-// Announcement is the announcement message, the first message in the CoSi protocol
+// Announcement is the ftcosi annoucement message
 type Announcement struct {
-	Msg       []byte
-	Data      []byte
-	Publics   []kyber.Point
-	Timeout   time.Duration
-	Threshold int
+	Msg []byte // statement to be signed
+	Data []byte
+	Publics []kyber.Point
+	Timeout time.Duration
 }
 
 // StructAnnouncement just contains Announcement and the data necessary to identify and
 // process the message in the onet framework.
 type StructAnnouncement struct {
-	*onet.TreeNode //sender
+	*onet.TreeNode
 	Announcement
 }
 
-// Commitment is the ftcosi commitment message
-type Commitment struct {
-	CoSiCommitment kyber.Point
-	Mask           []byte
-	NRefusal       int
-}
 
-// StructCommitment just contains Commitment and the data necessary to identify and
-// process the message in the onet framework.
-type StructCommitment struct {
-	*onet.TreeNode
-	Commitment
-}
-
-// Challenge is the ftcosi challenge message
-type Challenge struct {
-	// CoSiChallenge is deprecated and should not be used anymore!
-	CoSiChallenge kyber.Scalar
-	// AggregateCommit should be used by all nodes.
-	AggregateCommit kyber.Point
-	// Mask represents the nodes that participated in the signature.
-	Mask []byte
-}
-
-// StructChallenge just contains Challenge and the data necessary to identify and
-// process the message in the onet framework.
-type StructChallenge struct {
-	*onet.TreeNode
-	Challenge
-}
-
-// Response is the ftcosi response message
+// Response is the blsftcosi response message
 type Response struct {
 	CoSiReponse []byte
 	Mask        []byte
@@ -106,6 +64,7 @@ type StructResponse struct {
 	Response
 }
 
+
 // Stop is a message used to instruct a node to stop its protocol
 type Stop struct{}
 
@@ -113,4 +72,19 @@ type Stop struct{}
 type StructStop struct {
 	*onet.TreeNode
 	Stop
+}
+
+
+type Dummy struct{
+	DummyMsg []byte
+}
+
+type StructDummy struct {
+	*onet.TreeNode
+	Dummy
+}
+
+
+func Test() {
+	fmt.Println("hello")
 }

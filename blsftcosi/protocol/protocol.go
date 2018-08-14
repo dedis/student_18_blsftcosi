@@ -1,7 +1,3 @@
-// Package protocol is the fault tolerant cosi protocol implementation.
-//
-// For more information on the protocol, please see
-// https://github.com/dedis/cothority/blob/master/ftcosi/protocol/README.md.
 package protocol
 
 import (
@@ -10,13 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"math"
-
-	//"github.com/dedis/cothority"
 	"github.com/dedis/kyber"
 	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/kyber/pairing/bn256"
-	"github.com/dedis/kyber/sign/cosi"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
@@ -29,15 +21,14 @@ type VerificationFn func(msg []byte, data []byte) bool
 // init is done at startup. It defines every messages that is handled by the network
 // and registers the protocols.
 func init() {
-	network.RegisterMessages(Announcement{}, Commitment{}, Challenge{}, Response{}, Stop{})
+	network.RegisterMessages(Announcement{}, Response{}, Stop{})
 }
 
-// FtCosi holds the parameters of the protocol.
+// BlsFtCosi holds the parameters of the protocol.
 // It also defines a channel that will receive the final signature.
 // This protocol should only exist on the root node.
-type FtCosi struct {
+type BlsFtCosi struct {
 	*onet.TreeNodeInstance
-
 	NSubtrees      int
 	Msg            []byte
 	Data           []byte
@@ -45,16 +36,15 @@ type FtCosi struct {
 	// Timeout is not a global timeout for the protocol, but a timeout used
 	// for waiting for responses for sub protocols.
 	Timeout        time.Duration
-	Threshold      int
-	FinalSignature chan []byte
+	FinalSignature chan []byte // final signature that is sent back to client
 
-	publics         []kyber.Point
+	publics         []kyber.Point // list of public keys
 	stoppedOnce     sync.Once
-	subProtocols    []*SubFtCosi
+	subProtocols    []*SubBlsFtCosi
 	startChan       chan bool
 	subProtocolName string
 	verificationFn  VerificationFn
-	suite           cosi.Suite
+	suite           pairing.Suite
 }
 
 // CreateProtocolFunction is a function type which creates a new protocol
@@ -65,9 +55,10 @@ var ThePairingSuite = bn256.NewSuite()
 
 // NewDefaultProtocol is the default protocol function used for registration
 // with an always-true verification.
+// Called by GlobalRegisterDefaultProtocols
 func NewDefaultProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	vf := func(a, b []byte) bool { return true }
-	return NewFtCosi(n, vf, DefaultSubProtocolName, bn256.NewSuite())
+	return NewBlsFtCosi(n, vf, DefaultSubProtocolName, ThePairingSuite)
 }
 
 // GlobalRegisterDefaultProtocols is used to register the protocols before use,
@@ -78,9 +69,10 @@ func GlobalRegisterDefaultProtocols() {
 }
 
 // NewFtCosi method is used to define the ftcosi protocol.
-func NewFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName string, suite cosi.Suite) (onet.ProtocolInstance, error) {
+// Called by NewDefaultProtocol
+func NewBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName string, suite pairing.Suite) (onet.ProtocolInstance, error) {
 
-	c := &FtCosi{
+	c := &BlsFtCosi{
 		TreeNodeInstance: n,
 		FinalSignature:   make(chan []byte, 1),
 		Data:             make([]byte, 0),
@@ -95,7 +87,7 @@ func NewFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName stri
 }
 
 // Shutdown stops the protocol
-func (p *FtCosi) Shutdown() error {
+func (p *BlsFtCosi) Shutdown() error {
 	p.stoppedOnce.Do(func() {
 		for _, subFtCosi := range p.subProtocols {
 			subFtCosi.HandleStop(StructStop{subFtCosi.TreeNode(), Stop{}})
@@ -108,8 +100,10 @@ func (p *FtCosi) Shutdown() error {
 
 // Dispatch is the main method of the protocol, defining the root node behaviour
 // and sequential handling of subprotocols.
-func (p *FtCosi) Dispatch() error {
+func (p *BlsFtCosi) Dispatch() error {
 	defer p.Done()
+
+	// if node is not root, doesn't use protocol but sub-protocol
 	if !p.IsRoot() {
 		return nil
 	}
@@ -123,8 +117,9 @@ func (p *FtCosi) Dispatch() error {
 		return fmt.Errorf("timeout, did you forget to call Start?")
 	}
 
-	log.Lvl3("root protocol started")
+	log.Lvl3("leader protocol started")
 
+	// Verification of the data
 	verifyChan := make(chan bool, 1)
 	go func() {
 		log.Lvl3(p.ServerIdentity().Address, "starting verification")
@@ -139,13 +134,13 @@ func (p *FtCosi) Dispatch() error {
 		return fmt.Errorf("error in tree generation: %s", err)
 	}
 
-	// if one node or threshold is one, sign without subprotocols
-	if nNodes == 1 || p.Threshold == 1 {
+	// if one node, sign without subprotocols
+	if nNodes == 1 {
 		trees = make([]*onet.Tree, 0)
 	}
 
 	// start all subprotocols
-	p.subProtocols = make([]*SubFtCosi, len(trees))
+	p.subProtocols = make([]*SubBlsFtCosi, len(trees))
 	for i, tree := range trees {
 		p.subProtocols[i], err = p.startSubProtocol(tree)
 		if err != nil {
@@ -155,17 +150,6 @@ func (p *FtCosi) Dispatch() error {
 	}
 	log.Lvl3(p.ServerIdentity().Address, "all protocols started")
 
-	switch p.suite.(type) {
-	case pairing.Suite:
-		log.Lvl3("Using BLS Cosi")
-		return HandleSubProtocolsBLS(p, trees, verifyChan)
-	default:
-		log.Lvl3("Using default CoSi")
-		return HandleSubProtocolsDefault(p, trees, verifyChan)
-	}
-}
-
-func HandleSubProtocolsBLS(p *FtCosi, trees []*onet.Tree, verifyChan chan bool) error {
 	// Wait and collect all the signature responses
 	responses, runningSubProtocols, err := p.collectSignatures(trees, p.subProtocols)
 	if err != nil {
@@ -188,10 +172,11 @@ func HandleSubProtocolsBLS(p *FtCosi, trees []*onet.Tree, verifyChan chan bool) 
 		return fmt.Errorf("verification failed on root node")
 	}
 
-	pairing_suite, ok := p.suite.(pairing.Suite)
 	// generate root signature
-	signaturePoint, finalMask, err := generateSignature(pairing_suite, p.TreeNodeInstance, p.publics, responses, p.Msg, ok)
+	log.Lvl3("Generating root signature", p.suite, p.TreeNodeInstance, p.publics, responses, p.Msg, ok)
+	signaturePoint, finalMask, err := generateSignature(p.suite, p.TreeNodeInstance, p.publics, responses, p.Msg, ok)
 	if err != nil {
+		p.FinalSignature <- nil
 		return err
 	}
 
@@ -202,7 +187,7 @@ func HandleSubProtocolsBLS(p *FtCosi, trees []*onet.Tree, verifyChan chan bool) 
 
 	finalSignature := AppendSigAndMask(signature, finalMask)
 
-	log.Lvl3(p.ServerIdentity().Address, "Created final signature")
+	log.Lvl3(p.ServerIdentity().Address, "Created final signature", signature, finalMask, finalSignature)
 
 	p.FinalSignature <- finalSignature
 
@@ -211,137 +196,94 @@ func HandleSubProtocolsBLS(p *FtCosi, trees []*onet.Tree, verifyChan chan bool) 
 	log.Lvl3("Root-node is done without errors")
 
 	return nil
+
 }
 
-func HandleSubProtocolsDefault(p *FtCosi, trees []*onet.Tree, verifyChan chan bool) error {
-	// collect commitments
-	commitments, runningSubProtocols, err := p.collectCommitments(trees, p.subProtocols)
-	if err != nil {
-		p.FinalSignature <- nil
-		return err
-	}
+// Collect signatures from each sub-leader, restart whereever sub-leaders fail to respond.
+// The collected signatures are already aggregated for a particular group
+func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree, cosiSubProtocols []*SubBlsFtCosi) ([]StructResponse, []*SubBlsFtCosi, error) {
 
-	var secret kyber.Scalar
-	// verifies the proposal
-	var verificationOk bool
-	select {
-	case verificationOk = <-verifyChan:
-		close(verifyChan)
-	case <-time.After(p.Timeout):
-		log.Error(p.ServerIdentity(), "timeout while waiting for the verification!")
-	}
-	if !verificationOk {
-		// root should not fail the verification otherwise it would not have started the protocol
-		p.FinalSignature <- nil
-		return fmt.Errorf("verification failed on root node")
-	}
-
-	// add own commitment
-	var personalCommitment kyber.Point
-	secret, personalCommitment = cosi.Commit(p.suite)
-	personalMask, err := cosi.NewMask(p.suite, p.publics, p.Public())
-	if err != nil {
-		p.FinalSignature <- nil
-		return err
-	}
-	personalStructCommitment := StructCommitment{p.TreeNode(),
-		Commitment{personalCommitment, personalMask.Mask(), 0}}
-	commitments = append(commitments, personalStructCommitment)
-
-	// generate own aggregated commitment
-	commitment, finalMask, err := aggregateCommitments(p.suite, p.publics, commitments)
-	if err != nil {
-		p.FinalSignature <- nil
-		return err
-	}
-
-	log.Lvl3("root-node generating global challenge")
-	cosiChallenge, err := cosi.Challenge(p.suite, commitment, finalMask.AggregatePublic, p.Msg)
-	if err != nil {
-		p.FinalSignature <- nil
-		return err
-	}
-
-	// send challenge to every subprotocol
-	for _, coSiProtocol := range runningSubProtocols {
-		subProtocol := coSiProtocol
-		subProtocol.ChannelChallenge <- StructChallenge{coSiProtocol.Root(), Challenge{
-			CoSiChallenge:   cosiChallenge,
-			AggregateCommit: commitment,
-			Mask:            finalMask.Mask(),
-		}}
-	}
-
-	// get response from all subprotocols
+	var mut sync.Mutex
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(cosiSubProtocols))
 	responses := make([]StructResponse, 0)
-	errChan := make(chan error, len(runningSubProtocols))
-	var responsesMut sync.Mutex
-	var responsesWg sync.WaitGroup
-	responsesWg.Add(len(runningSubProtocols))
-	for i, cosiSubProtocol := range runningSubProtocols {
-		go func(i int, subProto *SubFtCosi) {
-			defer responsesWg.Done()
-			select {
-			case response := <-subProto.subResponse:
-				responsesMut.Lock()
-				responses = append(responses, response)
-				responsesMut.Unlock()
-			case <-time.After(p.Timeout):
-				// This should never happen, as the subProto should return before that
-				// timeout, even if it didn't receive enough responses.
-				errChan <- fmt.Errorf("timeout should not happen while waiting for response: %d", i)
-			}
-		}(i, cosiSubProtocol)
-	}
-	responsesWg.Wait()
+	runningSubProtocols := make([]*SubBlsFtCosi, 0)
 
-	// check errors if any
+	for i, subProtocol := range cosiSubProtocols {
+		wg.Add(1)
+		go func(i int, subProtocol *SubBlsFtCosi) {
+			defer wg.Done()
+			for {
+				select {
+				case <-subProtocol.subleaderNotResponding: // TODO need to modify not reponding step?
+
+					subleaderID := trees[i].Root.Children[0].RosterIndex
+					log.Lvlf2("subleader from tree %d (id %d) failed, restarting it", i, subleaderID)
+
+					// generate new tree by adding the current subleader to the end of the
+					// leafs and taking the first leaf for the new subleader.
+					nodes := []int{trees[i].Root.RosterIndex}
+					for _, child := range trees[i].Root.Children[0].Children {
+						nodes = append(nodes, child.RosterIndex)
+					}
+					if subleaderID > nodes[len(nodes)-1] {
+						errChan <- fmt.Errorf("(subprotocol %v) failed with every subleader, ignoring this subtree",
+							i)
+						return
+					}
+					nodes = append(nodes, subleaderID)
+
+					var err error
+					trees[i], err = genSubtree(trees[i].Roster, nodes)
+					if err != nil {
+						errChan <- fmt.Errorf("(subprotocol %v) error in tree generation: %v", i, err)
+						return
+					}
+
+					// restart subprotocol
+					// send stop signal to old protocol
+					subProtocol.HandleStop(StructStop{subProtocol.TreeNode(), Stop{}})
+					subProtocol, err = p.startSubProtocol(trees[i])
+					if err != nil {
+						errChan <- fmt.Errorf("(subprotocol %v) error in restarting of subprotocol: %s", i, err)
+						return
+					}
+					mut.Lock()
+					cosiSubProtocols[i] = subProtocol
+					mut.Unlock()
+				case response := <-subProtocol.subResponse:
+					mut.Lock()
+					runningSubProtocols = append(runningSubProtocols, subProtocol)
+					responses = append(responses, response)
+					mut.Unlock()
+					log.Lvl2("Received response", response, subProtocol)
+					return
+				case <-time.After(p.Timeout):
+					err := fmt.Errorf("(node %v) didn't get response after timeout %v", i, p.Timeout)
+					errChan <- err
+					return
+				}
+			}
+		}(i, subProtocol)
+	}
+	wg.Wait()
+
 	close(errChan)
 	var errs []error
 	for err := range errChan {
 		errs = append(errs, err)
 	}
+
 	if len(errs) > 0 {
-		p.FinalSignature <- nil
-		return fmt.Errorf("nodes timed out while waiting for response %v", errs)
+		return nil, nil, fmt.Errorf("failed to collect responses with errors %v", errs)
 	}
 
-	// generate own response
-	personalResponse, err := cosi.Response(p.suite, p.Private(), secret, cosiChallenge)
-	if err != nil {
-		p.FinalSignature <- nil
-		return fmt.Errorf("error while generating own response: %s", err)
-	}
-	tmp, err := ScalarToByteSlice(p.suite, personalResponse)
-	if err != nil {
-		return fmt.Errorf("Error while while marshalling the binary: %s", err)
-	}
-	responses = append(responses, StructResponse{p.TreeNode(), Response{CoSiReponse: tmp}})
-
-	aggResponse, err := aggregateResponses(p.suite, responses)
-	if err != nil {
-		p.FinalSignature <- nil
-		return err
-	}
-
-	// starts final signature
-	log.Lvl3(p.ServerIdentity().Address, "starts final signature")
-
-	var signature []byte
-	signature, err = cosi.Sign(p.suite, commitment, aggResponse, finalMask)
-	if err != nil {
-		p.FinalSignature <- nil
-		return err
-	}
-	p.FinalSignature <- signature
-
-	log.Lvl3("Root-node is done without errors")
-	return nil
+	return responses, runningSubProtocols, nil
 }
 
 // Start is done only by root and starts the protocol.
 // It also verifies that the protocol has been correctly parameterized.
-func (p *FtCosi) Start() error {
+func (p *BlsFtCosi) Start() error {
 	if p.Msg == nil {
 		p.Shutdown()
 		return fmt.Errorf("no proposal msg specified")
@@ -362,14 +304,6 @@ func (p *FtCosi) Start() error {
 		p.Shutdown()
 		return fmt.Errorf("unrealistic timeout")
 	}
-	if p.Threshold > p.Tree().Size() {
-		p.Shutdown()
-		return fmt.Errorf("threshold (%d) bigger than number of nodes (%d)", p.Threshold, p.Tree().Size())
-	}
-	if p.Threshold < 1 {
-		p.Shutdown()
-		return fmt.Errorf("threshold of %d smaller than one node", p.Threshold)
-	}
 
 	if p.NSubtrees < 1 {
 		log.Warn("no number of subtree specified, using one subtree")
@@ -388,28 +322,18 @@ func (p *FtCosi) Start() error {
 
 // startSubProtocol creates, parametrize and starts a subprotocol on a given tree
 // and returns the started protocol.
-func (p *FtCosi) startSubProtocol(tree *onet.Tree) (*SubFtCosi, error) {
+func (p *BlsFtCosi) startSubProtocol(tree *onet.Tree) (*SubBlsFtCosi, error) {
 
 	pi, err := p.CreateProtocol(p.subProtocolName, tree)
 	if err != nil {
 		return nil, err
 	}
 
-	cosiSubProtocol := pi.(*SubFtCosi)
+	cosiSubProtocol := pi.(*SubBlsFtCosi)
 	cosiSubProtocol.Publics = p.publics
 	cosiSubProtocol.Msg = p.Msg
 	cosiSubProtocol.Data = p.Data
-	// We allow for one subleader failure during the commit phase, and thus
-	// only allocate one third of the ftcosi budget to the subprotocol.
-	cosiSubProtocol.Timeout = p.Timeout / 3
-
-	// the Threshold (minus root node) is divided evenly among the subtrees
-	subThreshold := int(math.Ceil(float64(p.Threshold-1) / float64(p.NSubtrees)))
-	if subThreshold > tree.Size()-1 {
-		subThreshold = tree.Size() - 1
-	}
-
-	cosiSubProtocol.Threshold = subThreshold
+	cosiSubProtocol.Timeout = p.Timeout / 2
 
 	err = cosiSubProtocol.Start()
 	if err != nil {

@@ -1,15 +1,13 @@
-
 package protocol
 
 import (
-	"fmt"
-	"hash"
-	"time"
 	"crypto/cipher"
 	"crypto/sha512"
+	"hash"
+	"time"
 
-	"github.com/dedis/kyber/pairing"	
 	"github.com/dedis/kyber"
+	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/onet"
 )
 
@@ -37,8 +35,8 @@ func (m *blsftCosiSuite) RandomStream() cipher.Stream {
 
 // Announcement is the ftcosi annoucement message
 type Announcement struct {
-	Msg []byte // statement to be signed
-	Data []byte
+	Msg     []byte // statement to be signed
+	Data    []byte
 	Publics []kyber.Point
 	Timeout time.Duration
 }
@@ -49,7 +47,6 @@ type StructAnnouncement struct {
 	*onet.TreeNode
 	Announcement
 }
-
 
 // Response is the blsftcosi response message
 type Response struct {
@@ -64,7 +61,6 @@ type StructResponse struct {
 	Response
 }
 
-
 // Stop is a message used to instruct a node to stop its protocol
 type Stop struct{}
 
@@ -72,19 +68,4 @@ type Stop struct{}
 type StructStop struct {
 	*onet.TreeNode
 	Stop
-}
-
-
-type Dummy struct{
-	DummyMsg []byte
-}
-
-type StructDummy struct {
-	*onet.TreeNode
-	Dummy
-}
-
-
-func Test() {
-	fmt.Println("hello")
 }

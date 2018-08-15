@@ -371,7 +371,7 @@ func TestGenSubtreeErrors(t *testing.T) {
 		nodeList[1] = 0
 		_, err = genSubtree(roster, nodeList)
 		if err == nil {
-			t.Fatal("subtree generator should throw an error with a zero subleader id, but doesn't")
+			t.Fatal("subtree generator should not allow leader and subleader being the same")
 		}
 
 		nodeList[1] = nNodes

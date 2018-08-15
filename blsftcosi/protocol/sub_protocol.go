@@ -13,16 +13,19 @@ import (
 	"github.com/dedis/onet/log"
 )
 
+func init() {
+	GlobalRegisterDefaultProtocols()
+}
+
 // sub_protocol is run by each sub-leader and each node once, and n times by
 // the root leader, where n is the number of sub-leader.
 
 // SubFtCosi holds the different channels used to receive the different protocol messages.
 type SubBlsFtCosi struct {
 	*onet.TreeNodeInstance
-	Publics []kyber.Point
-	Msg     []byte
-	Data    []byte
-
+	Publics        []kyber.Point
+	Msg            []byte
+	Data           []byte
 	Timeout        time.Duration
 	stoppedOnce    sync.Once
 	verificationFn VerificationFn
@@ -36,10 +39,6 @@ type SubBlsFtCosi struct {
 	// internodes channels
 	ChannelAnnouncement chan StructAnnouncement
 	ChannelResponse     chan StructResponse
-}
-
-func init() {
-	GlobalRegisterDefaultProtocols()
 }
 
 // NewDefaultSubProtocol is the default sub-protocol function used for registration
@@ -64,16 +63,11 @@ func NewSubBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, pairingSuite p
 		c.subResponse = make(chan StructResponse, 1)
 	}
 
-	for _, channel := range []interface{}{
-		&c.ChannelAnnouncement,
-		&c.ChannelResponse,
-	} {
-		err := c.RegisterChannel(channel)
-		if err != nil {
-			return nil, errors.New("couldn't register channel: " + err.Error())
-		}
+	err := c.RegisterChannels(&c.ChannelAnnouncement, &c.ChannelResponse)
+	if err != nil {
+		return nil, errors.New("couldn't register channels: " + err.Error())
 	}
-	err := c.RegisterHandler(c.HandleStop)
+	err = c.RegisterHandler(c.HandleStop)
 	if err != nil {
 		return nil, errors.New("couldn't register stop handler: " + err.Error())
 	}
@@ -110,7 +104,7 @@ func (p *SubBlsFtCosi) Dispatch() error {
 
 	}
 
-	log.Lvl2(p.ServerIdentity().Address, "received annoucement ")
+	// get announcement parameters
 	p.Publics = announcement.Publics
 	p.Timeout = announcement.Timeout
 	if !p.IsRoot() {
@@ -119,7 +113,6 @@ func (p *SubBlsFtCosi) Dispatch() error {
 		// TODO: Check if we need to change the timeout for BLS protocol
 		p.Timeout /= 2
 	}
-	//var err error
 	p.Msg = announcement.Msg
 	p.Data = announcement.Data
 
@@ -131,8 +124,13 @@ func (p *SubBlsFtCosi) Dispatch() error {
 		}()
 	}
 
-	if errs := p.SendToChildrenInParallel(&announcement.Announcement); len(errs) > 0 {
-		log.Lvl3(p.ServerIdentity().Address, "failed to send announcement to all children")
+	if !p.IsLeaf() {
+		// Only send commits if the node has children
+		go func() {
+			if errs := p.SendToChildrenInParallel(&announcement.Announcement); len(errs) > 0 {
+				log.Error(p.ServerIdentity(), "failed to send announcement to all children, trying to continue")
+			}
+		}()
 	}
 
 	// Collect all responses from children, store them and wait till all have responded or timed out.
@@ -143,9 +141,8 @@ func (p *SubBlsFtCosi) Dispatch() error {
 			if !channelOpen {
 				return nil
 			}
-			log.Lvl2(p.ServerIdentity().Address, ": Received response on root:", response.Response)
 			responses = append(responses, response)
-		case <-time.After(p.Timeout * 10):
+		case <-time.After(p.Timeout):
 			// the timeout here should be shorter than the main protocol timeout
 			// because main protocol waits on the channel below
 
@@ -153,16 +150,15 @@ func (p *SubBlsFtCosi) Dispatch() error {
 			return nil
 		}
 	} else {
-		t := time.After(p.Timeout / 2)
+		t := time.After(p.Timeout)
 	loop:
 		// note that this section will not execute if it's on a leaf
 		for range p.Children() {
 			select {
 			case response, channelOpen := <-p.ChannelResponse:
 				if !channelOpen {
-					return nil
+					break loop
 				}
-				log.Lvl2(p.ServerIdentity().Address, ": Received response on subtree:", response.Response)
 				responses = append(responses, response)
 			case <-t:
 				break loop
@@ -191,7 +187,6 @@ func (p *SubBlsFtCosi) Dispatch() error {
 
 		// Generate own signature and aggregate with all children signatures
 		signaturePoint, finalMask, err := generateSignature(p.suite, p.TreeNodeInstance, p.Publics, responses, p.Msg, ok)
-		log.Lvl2(p.ServerIdentity().Address, "Generate Signature", signaturePoint, finalMask, err)
 
 		if err != nil {
 			return err

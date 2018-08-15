@@ -69,7 +69,6 @@ func GlobalRegisterDefaultProtocols() {
 }
 
 // NewFtCosi method is used to define the ftcosi protocol.
-// Called by NewDefaultProtocol
 func NewBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName string, suite pairing.Suite) (onet.ProtocolInstance, error) {
 
 	c := &BlsFtCosi{
@@ -102,8 +101,6 @@ func (p *BlsFtCosi) Shutdown() error {
 // and sequential handling of subprotocols.
 func (p *BlsFtCosi) Dispatch() error {
 	defer p.Done()
-
-	// if node is not root, doesn't use protocol but sub-protocol
 	if !p.IsRoot() {
 		return nil
 	}
@@ -117,7 +114,7 @@ func (p *BlsFtCosi) Dispatch() error {
 		return fmt.Errorf("timeout, did you forget to call Start?")
 	}
 
-	log.Lvl3("leader protocol started")
+	log.Lvl3("root protocol started")
 
 	// Verification of the data
 	verifyChan := make(chan bool, 1)
@@ -159,22 +156,27 @@ func (p *BlsFtCosi) Dispatch() error {
 
 	_ = runningSubProtocols
 
-	// TODO
-	//ok := true
-	ok := <-verifyChan
-	if !ok {
-		// root should not fail the verification otherwise it would not have
-		// started the protocol
+	// verifies the proposal
+	var verificationOk bool
+	select {
+	case verificationOk = <-verifyChan:
+		close(verifyChan)
+	case <-time.After(p.Timeout):
+		log.Error(p.ServerIdentity(), "timeout while waiting for the verification!")
+	}
+	if !verificationOk {
+		// root should not fail the verification otherwise it would not have started the protocol
 		p.FinalSignature <- nil
-		for _, coSiProtocol := range runningSubProtocols {
-			coSiProtocol.ChannelResponse <- StructResponse{}
-		}
+		// TODO- Do we need the following
+		/*
+			for _, coSiProtocol := range runningSubProtocols {
+				coSiProtocol.ChannelResponse <- StructResponse{}
+		*/
 		return fmt.Errorf("verification failed on root node")
 	}
 
 	// generate root signature
-	log.Lvl3("Generating root signature", p.suite, p.TreeNodeInstance, p.publics, responses, p.Msg, ok)
-	signaturePoint, finalMask, err := generateSignature(p.suite, p.TreeNodeInstance, p.publics, responses, p.Msg, ok)
+	signaturePoint, finalMask, err := generateSignature(p.suite, p.TreeNodeInstance, p.publics, responses, p.Msg, verificationOk)
 	if err != nil {
 		p.FinalSignature <- nil
 		return err
@@ -182,6 +184,7 @@ func (p *BlsFtCosi) Dispatch() error {
 
 	signature, err := signaturePoint.MarshalBinary()
 	if err != nil {
+		p.FinalSignature <- nil
 		return err
 	}
 
@@ -190,8 +193,6 @@ func (p *BlsFtCosi) Dispatch() error {
 	log.Lvl3(p.ServerIdentity().Address, "Created final signature", signature, finalMask, finalSignature)
 
 	p.FinalSignature <- finalSignature
-
-	//fmt.Println("xxx 2")
 
 	log.Lvl3("Root-node is done without errors")
 
@@ -206,9 +207,13 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree, cosiSubProtocols []*Su
 	var mut sync.Mutex
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(cosiSubProtocols))
+
 	responses := make([]StructResponse, 0)
 	runningSubProtocols := make([]*SubBlsFtCosi, 0)
 
+	// receive in parallel
+	//var closingWg sync.WaitGroup
+	//closingWg.Add(len(cosiSubProtocols))
 	for i, subProtocol := range cosiSubProtocols {
 		wg.Add(1)
 		go func(i int, subProtocol *SubBlsFtCosi) {
@@ -218,7 +223,6 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree, cosiSubProtocols []*Su
 				case <-subProtocol.subleaderNotResponding: // TODO need to modify not reponding step?
 
 					subleaderID := trees[i].Root.Children[0].RosterIndex
-					log.Lvlf2("subleader from tree %d (id %d) failed, restarting it", i, subleaderID)
 
 					// generate new tree by adding the current subleader to the end of the
 					// leafs and taking the first leaf for the new subleader.
@@ -226,7 +230,8 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree, cosiSubProtocols []*Su
 					for _, child := range trees[i].Root.Children[0].Children {
 						nodes = append(nodes, child.RosterIndex)
 					}
-					if subleaderID > nodes[len(nodes)-1] {
+					// TODO - This needs to be handled
+					if len(nodes) < 2 || subleaderID > nodes[1] {
 						errChan <- fmt.Errorf("(subprotocol %v) failed with every subleader, ignoring this subtree",
 							i)
 						return
@@ -258,7 +263,7 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree, cosiSubProtocols []*Su
 					mut.Unlock()
 					log.Lvl2("Received response", response, subProtocol)
 					return
-				case <-time.After(p.Timeout):
+				case <-time.After(20 * p.Timeout):
 					err := fmt.Errorf("(node %v) didn't get response after timeout %v", i, p.Timeout)
 					errChan <- err
 					return
@@ -268,6 +273,8 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree, cosiSubProtocols []*Su
 	}
 	wg.Wait()
 
+	// handle answers from all parallel threads
+	//closingWg.Wait()
 	close(errChan)
 	var errs []error
 	for err := range errChan {
@@ -275,6 +282,7 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree, cosiSubProtocols []*Su
 	}
 
 	if len(errs) > 0 {
+		p.FinalSignature <- nil
 		return nil, nil, fmt.Errorf("failed to collect responses with errors %v", errs)
 	}
 

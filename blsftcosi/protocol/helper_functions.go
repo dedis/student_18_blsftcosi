@@ -38,7 +38,6 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 		signatures = append(signatures, atmp)
 		masks = append(masks, r.Mask)
 	}
-	log.Lvl2("MASKS ", masks)
 
 	//generate personal mask
 	personalMask, err := NewMask(ps, publics, t.Public())
@@ -58,7 +57,6 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 	}
 
 	masks = append(masks, personalMask.Mask())
-	log.Lvl2("MASKZ ", masks)
 
 	// generate personal signature and append to other sigs
 	personalSig, err := bls.Sign(ps, t.Private(), msg)

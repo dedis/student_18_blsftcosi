@@ -9,7 +9,7 @@ import (
 
 // genTrees will create a given number of subtrees of the same number of nodes.
 // Each generated subtree will have the same root.
-// Each generated tree have a root with one child (the subleader)
+// Each generated tree has a root with one child (the subleader)
 // and all other nodes in the tree will be the subleader children.
 // NOTE: register being not implementable with the current API could hurt the scalability tests
 // TODO: we may be able to simplify the code here to make sure the existing onet

@@ -3,14 +3,14 @@ package service
 import (
 	"testing"
 
-	"github.com/dedis/cothority"
 	"github.com/dedis/kyber/sign/cosi"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
+	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"
 	"github.com/stretchr/testify/require"
 )
 
-var tSuite = cothority.Suite
+var tSuite = protocol.ThePairingSuite
 
 func TestMain(m *testing.M) {
 	log.MainTest(m)
@@ -25,7 +25,7 @@ func TestServiceCosi(t *testing.T) {
 
 	// Send a request to the service to all hosts
 	client := NewClient()
-	msg := []byte("hello ftcosi service")
+	msg := []byte("hello blsftcosi service")
 	serviceReq := &SignatureRequest{
 		Roster:  roster,
 		Message: msg,
@@ -37,7 +37,7 @@ func TestServiceCosi(t *testing.T) {
 		require.Nil(t, err, "Couldn't send")
 
 		// verify the response still
-		require.Nil(t, cosi.Verify(tSuite, roster.Publics(), msg, reply.Signature, cosi.CompletePolicy{}))
+		require.Nil(t, protocol.Verify(tSuite, roster.Publics(), msg, reply.Signature, protocol.CompletePolicy{}))
 	}
 }
 
@@ -50,7 +50,7 @@ func TestCreateAggregate(t *testing.T) {
 
 	// Send a request to the service
 	client := NewClient()
-	msg := []byte("hello ftcosi service")
+	msg := []byte("hello blsftcosi service")
 	log.Lvl1("Sending request to service...")
 
 	el1 := &onet.Roster{}
@@ -62,5 +62,5 @@ func TestCreateAggregate(t *testing.T) {
 	require.Nil(t, err, "Couldn't send")
 
 	// verify the response still
-	require.Nil(t, cosi.Verify(tSuite, roster.Publics(), msg, res.Signature, cosi.CompletePolicy{}))
+	require.Nil(t, protocol.Verify(tSuite, roster.Publics(), msg, res.Signature, protocol.CompletePolicy{}))
 }

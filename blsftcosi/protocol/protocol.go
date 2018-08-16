@@ -139,6 +139,7 @@ func (p *BlsFtCosi) Dispatch() error {
 	// start all subprotocols
 	p.subProtocols = make([]*SubBlsFtCosi, len(trees))
 	for i, tree := range trees {
+		log.Lvl2("Invoking start sub protocol", tree)
 		p.subProtocols[i], err = p.startSubProtocol(tree)
 		if err != nil {
 			p.FinalSignature <- nil
@@ -248,6 +249,8 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree, cosiSubProtocols []*Su
 					// restart subprotocol
 					// send stop signal to old protocol
 					subProtocol.HandleStop(StructStop{subProtocol.TreeNode(), Stop{}})
+					log.Lvl3("Send stop signal to", subProtocol.ServerIdentity())
+					log.Lvl2("Invoking start sub protocol", i, trees[i])
 					subProtocol, err = p.startSubProtocol(trees[i])
 					if err != nil {
 						errChan <- fmt.Errorf("(subprotocol %v) error in restarting of subprotocol: %s", i, err)
@@ -336,13 +339,13 @@ func (p *BlsFtCosi) startSubProtocol(tree *onet.Tree) (*SubBlsFtCosi, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	cosiSubProtocol := pi.(*SubBlsFtCosi)
 	cosiSubProtocol.Publics = p.publics
 	cosiSubProtocol.Msg = p.Msg
 	cosiSubProtocol.Data = p.Data
 	cosiSubProtocol.Timeout = p.Timeout / 2
 
+	log.Lvl2("Starting sub protocol on", tree)
 	err = cosiSubProtocol.Start()
 	if err != nil {
 		return nil, err

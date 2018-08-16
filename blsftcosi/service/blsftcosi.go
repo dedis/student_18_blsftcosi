@@ -1,4 +1,4 @@
-// Package service implements a ftcosi service for which clients can connect to
+// Package service implements a blsftcosi service for which clients can connect to
 // and then sign messages.
 package service
 
@@ -7,12 +7,12 @@ import (
 	"math"
 	"time"
 
-	"github.com/dedis/cothority/ftcosi/protocol"
+	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/kyber/pairing/bn256"
-	"github.com/dedis/kyber/sign/cosi"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
+	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"
 )
 
 // This file contains all the code to run a CoSi service. It is used to reply to
@@ -21,7 +21,7 @@ import (
 // updated version that chains all signatures for example.
 
 // ServiceName is the name to refer to the CoSi service
-const ServiceName = "ftCoSiService"
+const ServiceName = "blsftCoSiService"
 
 func init() {
 	onet.RegisterNewService(ServiceName, newCoSiService)
@@ -32,7 +32,7 @@ func init() {
 // Service is the service that handles collective signing operations
 type Service struct {
 	*onet.ServiceProcessor
-	suite cosi.Suite
+	suite pairing.Suite
 }
 
 // SignatureRequest is what the Cosi service is expected to receive from clients.
@@ -65,7 +65,7 @@ func (s *Service) SignatureRequest(req *SignatureRequest) (network.Message, erro
 	}
 
 	// configure the protocol
-	p := pi.(*protocol.FtCosi)
+	p := pi.(*protocol.BlsFtCosi)
 	p.CreateProtocol = s.CreateProtocol
 	p.Msg = req.Message
 	// We set NSubtrees to the square root of n to evenly distribute the load
@@ -74,8 +74,9 @@ func (s *Service) SignatureRequest(req *SignatureRequest) (network.Message, erro
 	if p.NSubtrees < 1 {
 		p.NSubtrees = 1
 	}
+	// TODO
 	// Complete Threshold
-	p.Threshold = p.Tree().Size()
+	//p.Threshold = p.Tree().Size()
 
 	// start the protocol
 	log.Lvl3("Cosi Service starting up root protocol")

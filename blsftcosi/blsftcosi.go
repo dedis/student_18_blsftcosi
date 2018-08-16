@@ -8,16 +8,16 @@ import (
 	"path"
 	"time"
 
-	"github.com/dedis/cothority"
 	"github.com/dedis/onet/app"
 	"github.com/dedis/onet/cfgpath"
 	"github.com/dedis/onet/log"
+	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"
 	"gopkg.in/urfave/cli.v1"
 )
 
 const (
 	// BinaryName represents the Name of the binary
-	BinaryName = "ftcosi"
+	BinaryName = "blsftcosi"
 
 	// Version of the binary
 	Version = "1.00"
@@ -35,7 +35,7 @@ const (
 
 func main() {
 	cliApp := cli.NewApp()
-	cliApp.Name = "ftcosi"
+	cliApp.Name = "blsftcosi"
 	cliApp.Usage = "collectively sign or verify a file; run a server for collective signing"
 	cliApp.Version = Version
 	binaryFlags := []cli.Flag{
@@ -105,7 +105,7 @@ func main() {
 		// BEGIN SERVER --------
 		{
 			Name:  "server",
-			Usage: "Start ftcosi server",
+			Usage: "Start blsftcosi server",
 			Action: func(c *cli.Context) error {
 				runServer(c)
 				return nil
@@ -123,7 +123,7 @@ func main() {
 						if c.GlobalIsSet("debug") {
 							log.Fatal("[-] Debug option cannot be used for the 'setup' command")
 						}
-						app.InteractiveConfig(cothority.Suite, BinaryName)
+						app.InteractiveConfig(protocol.ThePairingSuite, BinaryName)
 						return nil
 					},
 				},

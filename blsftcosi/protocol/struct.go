@@ -33,7 +33,7 @@ func (m *blsftCosiSuite) RandomStream() cipher.Stream {
 	return m.r
 }
 
-// Announcement is the ftcosi annoucement message
+// Announcement is the blsftcosi annoucement message
 type Announcement struct {
 	Msg     []byte // statement to be signed
 	Data    []byte

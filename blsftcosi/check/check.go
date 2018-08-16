@@ -13,13 +13,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dedis/cothority/ftcosi/service"
 	"github.com/dedis/kyber"
-	"github.com/dedis/kyber/sign/cosi"
+	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/app"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
+	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"
+	"github.com/dedis/student_18_blsftcosi/blsftcosi/service"
 )
 
 // RequestTimeOut is how long we're willing to wait for a signature.
@@ -108,7 +109,7 @@ func Servers(g *app.Group, detail bool) error {
 // error.
 func checkList(list *onet.Roster, descs []string, detail bool) error {
 	client := service.NewClient()
-	suite, ok := client.Suite().(cosi.Suite)
+	suite, ok := client.Suite().(pairing.Suite)
 	if !ok {
 		return errors.New("not a cosi suite")
 	}
@@ -142,7 +143,7 @@ func checkList(list *onet.Roster, descs []string, detail bool) error {
 // the roster el to create the collective signature.
 // In case the signature fails, an error is returned.
 func signStatement(client *service.Client, read io.Reader, el *onet.Roster) (*service.SignatureResponse, error) {
-	suite, ok := client.Suite().(cosi.Suite)
+	suite, ok := client.Suite().(pairing.Suite)
 	if !ok {
 		return nil, errors.New("not a cosi suite")
 	}
@@ -169,7 +170,7 @@ func signStatement(client *service.Client, read io.Reader, el *onet.Roster) (*se
 		if !ok || err != nil {
 			return nil, errors.New("received an invalid response")
 		}
-		err = cosi.Verify(suite, el.Publics(), msg, response.Signature, cosi.CompletePolicy{})
+		err = protocol.Verify(suite, el.Publics(), msg, response.Signature, protocol.CompletePolicy{})
 		if err != nil {
 			return nil, err
 		}
@@ -182,7 +183,7 @@ func signStatement(client *service.Client, read io.Reader, el *onet.Roster) (*se
 // verifySignatureHash verifies if the message b is correctly signed by signature
 // sig from roster el.
 // If the signature-check fails for any reason, an error is returned.
-func verifySignatureHash(suite cosi.Suite, b []byte, sig *service.SignatureResponse, el *onet.Roster) error {
+func verifySignatureHash(suite pairing.Suite, b []byte, sig *service.SignatureResponse, el *onet.Roster) error {
 	// We have to hash twice, as the hash in the signature is the hash of the
 	// message sent to be signed
 	h := suite.(kyber.HashFactory).Hash()
@@ -197,7 +198,7 @@ func verifySignatureHash(suite cosi.Suite, b []byte, sig *service.SignatureRespo
 			"belonging to another file. (The hash provided by the signature " +
 			"doesn't match with the hash of the file.)")
 	}
-	err := cosi.Verify(suite, el.Publics(), fHash, sig.Signature, cosi.CompletePolicy{})
+	err := protocol.Verify(suite, el.Publics(), fHash, sig.Signature, protocol.CompletePolicy{})
 	if err != nil {
 		return errors.New("Invalid sig:" + err.Error())
 	}

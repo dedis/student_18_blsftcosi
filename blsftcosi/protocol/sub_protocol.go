@@ -82,6 +82,7 @@ func (p *SubBlsFtCosi) Dispatch() error {
 			if err != nil {
 				log.Error("error while broadcasting stopping message:", err)
 			}
+			log.Lvl2("Broadcasting stop", p.ServerIdentity())
 		}
 		p.Done()
 	}()
@@ -92,6 +93,7 @@ func (p *SubBlsFtCosi) Dispatch() error {
 	for {
 		announcement, channelOpen = <-p.ChannelAnnouncement
 		if !channelOpen {
+			log.Lvl2("Channel closed", p.ServerIdentity())
 			return nil
 		}
 		if !isValidSender(announcement.TreeNode, p.Parent(), p.TreeNode()) {
@@ -258,6 +260,7 @@ func (p *SubBlsFtCosi) HandleStop(stop StructStop) error {
 		log.Warn(p.ServerIdentity(), "received a Stop from node", stop.ServerIdentity,
 			"that is not the root, ignored")
 	}
+	log.Lvl3("Received stop", p.ServerIdentity())
 	close(p.ChannelAnnouncement)
 	close(p.ChannelResponse)
 	return nil

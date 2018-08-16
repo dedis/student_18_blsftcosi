@@ -10,14 +10,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/dedis/cothority"
-	"github.com/dedis/cothority/ftcosi/check"
-	s "github.com/dedis/cothority/ftcosi/service"
 	"github.com/dedis/kyber"
-	"github.com/dedis/kyber/sign/cosi"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/app"
 	"github.com/dedis/onet/log"
+	"github.com/dedis/student_18_blsftcosi/blsftcosi/check"
+	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"
+	s "github.com/dedis/student_18_blsftcosi/blsftcosi/service"
 	"gopkg.in/urfave/cli.v1"
 )
 
@@ -109,7 +108,7 @@ func sign(r io.Reader, tomlFileName string) (*s.SignatureResponse, error) {
 		return nil, err
 	}
 	if len(g.Roster.List) <= 0 {
-		return nil, errors.New("Empty or invalid ftcosi group file:" +
+		return nil, errors.New("Empty or invalid blsftcosi group file:" +
 			tomlFileName)
 	}
 	log.Lvl2("Sending signature to", g.Roster)
@@ -127,7 +126,7 @@ func signStatement(read io.Reader, el *onet.Roster) (*s.SignatureResponse,
 	publics := entityListToPublics(el)
 	client := s.NewClient()
 
-	h := cothority.Suite.Hash()
+	h := protocol.ThePairingSuite.Hash()
 	io.Copy(h, read)
 	msg := h.Sum(nil)
 
@@ -151,7 +150,7 @@ func signStatement(read io.Reader, el *onet.Roster) (*s.SignatureResponse,
 			return nil, errors.New("received an invalid repsonse")
 		}
 
-		err = cosi.Verify(cothority.Suite, publics, msg, response.Signature, cosi.CompletePolicy{})
+		err = protocol.Verify(protocol.ThePairingSuite, publics, msg, response.Signature, protocol.CompletePolicy{})
 		if err != nil {
 			return nil, err
 		}
@@ -209,7 +208,7 @@ func verifySignatureHash(b []byte, sig *s.SignatureResponse, el *onet.Roster) er
 	// We have to hash twice, as the hash in the signature is the hash of the
 	// message sent to be signed
 	publics := entityListToPublics(el)
-	h := cothority.Suite.Hash()
+	h := protocol.ThePairingSuite.Hash()
 	h.Write(b)
 	fHash := h.Sum(nil)
 	h.Reset()
@@ -220,7 +219,8 @@ func verifySignatureHash(b []byte, sig *s.SignatureResponse, el *onet.Roster) er
 			"belonging to another file. (The hash provided by the signature " +
 			"doesn't match with the hash of the file.)")
 	}
-	if err := cosi.Verify(cothority.Suite, publics, fHash, sig.Signature, cosi.CompletePolicy{}); err != nil {
+	// TODO - We should use suite from cothority
+	if err := protocol.Verify(protocol.ThePairingSuite, publics, fHash, sig.Signature, protocol.CompletePolicy{}); err != nil {
 		return errors.New("Invalid sig:" + err.Error())
 	}
 	return nil

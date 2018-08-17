@@ -23,6 +23,10 @@ func init() {
 // SubFtCosi holds the different channels used to receive the different protocol messages.
 type SubBlsFtCosi struct {
 	*onet.TreeNodeInstance
+	// TODO: change this to a binary representation of the points. For marshaling,
+	// a simple protobuf.Encode is enough. For unmarshaling, you need to do
+	// protobuf.DecodeWithConstructor(buf, publics, network.DefaultConstructors(NewNetworkSuite()))
+	// Publics []byte
 	Publics        []kyber.Point
 	Msg            []byte
 	Data           []byte

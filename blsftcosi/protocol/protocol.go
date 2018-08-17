@@ -9,10 +9,15 @@ import (
 	"github.com/dedis/kyber"
 	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/kyber/pairing/bn256"
+	"github.com/dedis/kyber/util/key"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
 )
+
+// some ugly global variable holding all the bn256 keypairs. Only to be used for
+// private keys. Will be replaced with services later.
+var globalKeyPairs []key.Pair
 
 // VerificationFn is called on every node. Where msg is the message that is
 // co-signed and the data is additional data for verification.
@@ -75,11 +80,12 @@ func NewBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName s
 		TreeNodeInstance: n,
 		FinalSignature:   make(chan []byte, 1),
 		Data:             make([]byte, 0),
-		publics:          n.Roster().Publics(),
-		startChan:        make(chan bool, 1),
-		verificationFn:   vf,
-		subProtocolName:  subProtocolName,
-		suite:            suite,
+		// TODO: change to read publics from globalKeyPair
+		publics:         n.Roster().Publics(),
+		startChan:       make(chan bool, 1),
+		verificationFn:  vf,
+		subProtocolName: subProtocolName,
+		suite:           suite,
 	}
 
 	return c, nil

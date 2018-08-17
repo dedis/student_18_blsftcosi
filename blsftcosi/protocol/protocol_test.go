@@ -375,8 +375,10 @@ func TestProtocolRefusalAll(t *testing.T) {
 }
 
 func TestProtocolRefuseOne(t *testing.T) {
-	nodes := []int{4, 5, 13}
-	subtrees := []int{1, 2, 5, 9}
+	// nodes := []int{4, 5, 13}
+	// subtrees := []int{1, 2, 5, 9}
+	nodes := []int{13}
+	subtrees := []int{2}
 	proposal := []byte{0xFF}
 
 	for _, nNodes := range nodes {
@@ -389,66 +391,67 @@ func TestProtocolRefuseOne(t *testing.T) {
 			if nodesPerSubtree <= 1 {
 				continue
 			}
-			for refuseIdx := 1; refuseIdx < nNodes; refuseIdx++ {
-				log.Lvl2("test asking for", nNodes, "nodes and", nSubtrees, "subtrees. "+
-					"Node", refuseIdx, "will refuse.")
-				counter = &Counter{refuseIdx: refuseIdx}
+			// for refuseIdx := 1; refuseIdx < nNodes; refuseIdx++ {
+			refuseIdx := 12
+			log.Lvl2("test asking for", nNodes, "nodes and", nSubtrees, "subtrees. "+
+				"Node", refuseIdx, "will refuse.")
+			counter = &Counter{refuseIdx: refuseIdx}
 
-				local := onet.NewLocalTest(testSuite)
-				_, _, tree := local.GenTree(nNodes, false)
-				publics := tree.Roster.Publics()
+			local := onet.NewLocalTest(testSuite)
+			_, _, tree := local.GenTree(nNodes, false)
+			publics := tree.Roster.Publics()
 
-				pi, err := local.CreateProtocol(RefuseOneProtocolName, tree)
-				if err != nil {
-					local.CloseAll()
-					t.Fatal("Error in creation of protocol:", err)
-				}
-				cosiProtocol := pi.(*BlsFtCosi)
-				cosiProtocol.CreateProtocol = local.CreateProtocol
-				cosiProtocol.Msg = proposal
-				cosiProtocol.NSubtrees = nSubtrees
-				cosiProtocol.Timeout = defaultTimeout
-				//cosiProtocol.Threshold = nNodes - 1
-
-				err = cosiProtocol.Start()
-				if err != nil {
-					local.CloseAll()
-					t.Fatal(err)
-				}
-
-				// only the leader agrees, the verification should only pass with a threshold of 1
-				// the rest, including using the complete policy should fail
-				var signature []byte
-				select {
-				case signature = <-cosiProtocol.FinalSignature:
-					log.Lvl3("Instance is done")
-				case <-time.After(defaultTimeout * 50):
-					// wait a bit longer than the protocol timeout
-					log.Lvl3("didn't get commitment in time")
-					t.Fatal("didn't get commitment in time")
-				}
-
-				err = verifySignature(signature, publics, proposal, CompletePolicy{})
-				if err == nil {
-					local.CloseAll()
-					t.Fatalf("verification should fail, refused index: %d", refuseIdx)
-				}
-
-				err = verifySignature(signature, publics, proposal, NewThresholdPolicy(nNodes-1))
-				if err != nil {
-					local.CloseAll()
-					t.Fatal(err)
-				}
+			pi, err := local.CreateProtocol(RefuseOneProtocolName, tree)
+			if err != nil {
 				local.CloseAll()
-
-				//TODO- The counter verification needs to be fixed for subtree regeneration
-				/*
-					counter.Lock()
-					if counter.veriCount != nNodes-1 {
-						counter.Unlock()
-						t.Fatalf("not the right number of verified count, need %d but got %d", nNodes-1, counter.veriCount)
-					}*/
+				t.Fatal("Error in creation of protocol:", err)
 			}
+			cosiProtocol := pi.(*BlsFtCosi)
+			cosiProtocol.CreateProtocol = local.CreateProtocol
+			cosiProtocol.Msg = proposal
+			cosiProtocol.NSubtrees = nSubtrees
+			cosiProtocol.Timeout = defaultTimeout
+			//cosiProtocol.Threshold = nNodes - 1
+
+			err = cosiProtocol.Start()
+			if err != nil {
+				local.CloseAll()
+				t.Fatal(err)
+			}
+
+			// only the leader agrees, the verification should only pass with a threshold of 1
+			// the rest, including using the complete policy should fail
+			var signature []byte
+			select {
+			case signature = <-cosiProtocol.FinalSignature:
+				log.Lvl3("Instance is done")
+			case <-time.After(defaultTimeout * 50):
+				// wait a bit longer than the protocol timeout
+				log.Lvl3("didn't get commitment in time")
+				t.Fatal("didn't get commitment in time")
+			}
+
+			err = verifySignature(signature, publics, proposal, CompletePolicy{})
+			if err == nil {
+				local.CloseAll()
+				t.Fatalf("verification should fail, refused index: %d", refuseIdx)
+			}
+
+			err = verifySignature(signature, publics, proposal, NewThresholdPolicy(nNodes-1))
+			if err != nil {
+				local.CloseAll()
+				t.Fatal(err)
+			}
+			local.CloseAll()
+
+			//TODO- The counter verification needs to be fixed for subtree regeneration
+			/*
+				counter.Lock()
+				if counter.veriCount != nNodes-1 {
+					counter.Unlock()
+					t.Fatalf("not the right number of verified count, need %d but got %d", nNodes-1, counter.veriCount)
+				}*/
+			// }
 		}
 	}
 }

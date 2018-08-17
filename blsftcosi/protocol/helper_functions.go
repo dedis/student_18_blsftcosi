@@ -42,7 +42,6 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 	//generate personal mask
 	personalMask, err := NewMask(ps, publics, t.Public())
 
-	// TODO if not ok, remove bit in mask
 	if !ok {
 		var found bool
 		for i, p := range publics {

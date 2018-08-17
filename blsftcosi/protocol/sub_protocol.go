@@ -144,7 +144,7 @@ func (p *SubBlsFtCosi) Dispatch() error {
 				return nil
 			}
 			responses = append(responses, response)
-		case <-time.After(p.Timeout):
+		case <-time.After(5 * p.Timeout):
 			// the timeout here should be shorter than the main protocol timeout
 			// because main protocol waits on the channel below
 
@@ -181,11 +181,10 @@ func (p *SubBlsFtCosi) Dispatch() error {
 	} else {
 
 		ok = <-verifyChan
+		// unset the mask if the verification failed and remove commitment
 		if !ok {
 			log.Lvl2(p.ServerIdentity().Address, "verification failed, unsetting the mask")
 		}
-
-		// unset the mask if the verification failed and remove commitment
 
 		// Generate own signature and aggregate with all children signatures
 		signaturePoint, finalMask, err := generateSignature(p.suite, p.TreeNodeInstance, p.Publics, responses, p.Msg, ok)
@@ -196,23 +195,11 @@ func (p *SubBlsFtCosi) Dispatch() error {
 
 		tmp, err := PointToByteSlice(p.suite, signaturePoint)
 
-		var found bool
-		if !ok {
-			for i := range p.Publics {
-				if p.Public().Equal(p.Publics[i]) {
-					finalMask.SetBit(i, false)
-					found = true
-					break
-				}
-			}
-		}
-		if !ok && !found {
-			return fmt.Errorf("%s was unable to find its own public key", p.ServerIdentity().Address)
-		}
-
-		if !ok {
-			return errors.New("stopping because we won't send to parent")
-		}
+		// TODO - Investigate why below line was added
+		/*
+			if !ok {
+				return errors.New("stopping because we won't send to parent")
+			}*/
 
 		response := &Response{CoSiReponse: tmp, Mask: finalMask.mask}
 		log.Lvl2("Sending response", response, "from", p.ServerIdentity().Address, "to", p.Parent().ServerIdentity.Address)

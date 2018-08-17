@@ -3,7 +3,6 @@ package service
 import (
 	"testing"
 
-	"github.com/dedis/kyber/sign/cosi"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"

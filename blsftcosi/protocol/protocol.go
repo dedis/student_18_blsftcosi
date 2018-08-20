@@ -6,10 +6,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dedis/cothority"
 	"github.com/dedis/kyber"
-	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/kyber/pairing/bn256"
 	"github.com/dedis/kyber/sign/bls"
+	"github.com/dedis/kyber/sign/cosi"
 	"github.com/dedis/kyber/util/key"
 	"github.com/dedis/kyber/util/random"
 	"github.com/dedis/onet"
@@ -45,13 +46,13 @@ type BlsFtCosi struct {
 	Timeout        time.Duration
 	FinalSignature chan []byte // final signature that is sent back to client
 
-	publics         []kyber.Point
+	publics         [][]byte // Public keys are marshaled binaries of G2 points
 	stoppedOnce     sync.Once
 	subProtocols    []*SubBlsFtCosi
 	startChan       chan bool
 	subProtocolName string
 	verificationFn  VerificationFn
-	suite           pairing.Suite
+	suite           cosi.Suite
 }
 
 // CreateProtocolFunction is a function type which creates a new protocol
@@ -65,7 +66,7 @@ var ThePairingSuite = bn256.NewSuite()
 // Called by GlobalRegisterDefaultProtocols
 func NewDefaultProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	vf := func(a, b []byte) bool { return true }
-	return NewBlsFtCosi(n, vf, DefaultSubProtocolName, ThePairingSuite)
+	return NewBlsFtCosi(n, vf, DefaultSubProtocolName, cothority.Suite)
 }
 
 // GlobalRegisterDefaultProtocols is used to register the protocols before use,
@@ -76,16 +77,19 @@ func GlobalRegisterDefaultProtocols() {
 }
 
 // NewFtCosi method is used to define the ftcosi protocol.
-func NewBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName string, suite pairing.Suite) (onet.ProtocolInstance, error) {
+func NewBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName string, suite cosi.Suite) (onet.ProtocolInstance, error) {
 
 	// Populate globalKeyPairs. TODO - To be replaced by service later
 	globalKeyPairs = make([]key.Pair, len(n.Roster().List))
-	publics := make([]kyber.Point, len(n.Roster().List))
-	for i, server_iden := range n.Roster().List {
-		private, public := bls.NewKeyPair(suite, random.New())
+	publics := make([][]byte, len(n.Roster().List))
+	var err error
+	for i, _ := range n.Roster().List {
+		private, public := bls.NewKeyPair(ThePairingSuite, random.New())
 		globalKeyPairs[i] = key.Pair{Private: private, Public: public}
-		publics[i] = public
-		log.Lvl3(server_iden, "Index is", i, "Key pair gen", public)
+		publics[i], err = PublicKeyToByteSlice(public)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	c := &BlsFtCosi{
@@ -193,8 +197,17 @@ func (p *BlsFtCosi) Dispatch() error {
 		return fmt.Errorf("verification failed on root node")
 	}
 
+	// Unmarshal public keys
+	publics := make([]kyber.Point, len(p.publics))
+	for i, public := range p.publics {
+		publics[i], err = publicByteSliceToPoint(public)
+		if err != nil {
+			return err
+		}
+	}
+
 	// generate root signature
-	signaturePoint, finalMask, err := generateSignature(p.suite, p.TreeNodeInstance, p.publics, responses, p.Msg, verificationOk)
+	signaturePoint, finalMask, err := generateSignature(p.TreeNodeInstance, publics, responses, p.Msg, verificationOk)
 	if err != nil {
 		p.FinalSignature <- nil
 		return err
@@ -283,7 +296,7 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree, cosiSubProtocols []*Su
 					mut.Unlock()
 					log.Lvl2("Received response", response, subProtocol)
 					return
-				case <-time.After(20 * p.Timeout):
+				case <-time.After(p.Timeout):
 					err := fmt.Errorf("(node %v) didn't get response after timeout %v", i, p.Timeout)
 					errChan <- err
 					return

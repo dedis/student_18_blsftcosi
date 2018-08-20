@@ -6,7 +6,6 @@ import (
 	"hash"
 	"time"
 
-	"github.com/dedis/kyber"
 	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/onet"
 )
@@ -37,7 +36,7 @@ func (m *blsftCosiSuite) RandomStream() cipher.Stream {
 type Announcement struct {
 	Msg     []byte // statement to be signed
 	Data    []byte
-	Publics []kyber.Point
+	Publics [][]byte
 	Timeout time.Duration
 }
 

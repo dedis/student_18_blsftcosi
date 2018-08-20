@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dedis/cothority"
 	"github.com/dedis/kyber"
-	"github.com/dedis/kyber/pairing"
+	"github.com/dedis/kyber/sign/cosi"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 )
@@ -22,17 +23,13 @@ func init() {
 // SubFtCosi holds the different channels used to receive the different protocol messages.
 type SubBlsFtCosi struct {
 	*onet.TreeNodeInstance
-	// TODO: change this to a binary representation of the points. For marshaling,
-	// a simple protobuf.Encode is enough. For unmarshaling, you need to do
-	// protobuf.DecodeWithConstructor(buf, publics, network.DefaultConstructors(NewNetworkSuite()))
-	// Publics []byte
-	Publics        []kyber.Point
+	Publics        [][]byte
 	Msg            []byte
 	Data           []byte
 	Timeout        time.Duration
 	stoppedOnce    sync.Once
 	verificationFn VerificationFn
-	suite          pairing.Suite
+	suite          cosi.Suite
 
 	// protocol/subprotocol channels
 	// these are used to communicate between the subprotocol and the main protocol
@@ -48,17 +45,17 @@ type SubBlsFtCosi struct {
 // with an always-true verification.
 func NewDefaultSubProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	vf := func(a, b []byte) bool { return true }
-	return NewSubBlsFtCosi(n, vf, ThePairingSuite)
+	return NewSubBlsFtCosi(n, vf, cothority.Suite)
 }
 
 // NewSubFtCosi is used to define the subprotocol and to register
 // the channels where the messages will be received.
-func NewSubBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, pairingSuite pairing.Suite) (onet.ProtocolInstance, error) {
+func NewSubBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, suite cosi.Suite) (onet.ProtocolInstance, error) {
 
 	c := &SubBlsFtCosi{
 		TreeNodeInstance: n,
 		verificationFn:   vf,
-		suite:            pairingSuite,
+		suite:            suite,
 	}
 
 	if n.IsRoot() {
@@ -147,7 +144,7 @@ func (p *SubBlsFtCosi) Dispatch() error {
 				return nil
 			}
 			responses = append(responses, response)
-		case <-time.After(5 * p.Timeout):
+		case <-time.After(p.Timeout):
 			// the timeout here should be shorter than the main protocol timeout
 			// because main protocol waits on the channel below
 
@@ -189,15 +186,24 @@ func (p *SubBlsFtCosi) Dispatch() error {
 			log.Lvl2(p.ServerIdentity().Address, "verification failed, unsetting the mask")
 		}
 
+		// Unmarshal public keys
+		var err error
+		publics := make([]kyber.Point, len(p.Publics))
+		for i, public := range p.Publics {
+			publics[i], err = publicByteSliceToPoint(public)
+			if err != nil {
+				return err
+			}
+		}
+
 		// Generate own signature and aggregate with all children signatures
-		log.Lvl3(p.ServerIdentity(), "Index is", p.Index(), "Key pair is", globalKeyPairs[p.Index()])
-		signaturePoint, finalMask, err := generateSignature(p.suite, p.TreeNodeInstance, p.Publics, responses, p.Msg, ok)
+		signaturePoint, finalMask, err := generateSignature(p.TreeNodeInstance, publics, responses, p.Msg, ok)
 
 		if err != nil {
 			return err
 		}
 
-		tmp, err := PointToByteSlice(p.suite, signaturePoint)
+		tmp, err := PointToByteSlice(signaturePoint)
 
 		// TODO - Investigate why below line was added
 		/*

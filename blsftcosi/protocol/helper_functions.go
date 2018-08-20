@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/dedis/kyber"
-	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/kyber/sign/bls"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
@@ -13,9 +12,11 @@ import (
 	"github.com/dedis/onet/simul/monitor"
 )
 
+var pairing_suite = ThePairingSuite
+
 // Sign the message with this node and aggregates with all child signatures (in structResponses)
 // Also aggregates the child bitmasks
-func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyber.Point, structResponses []StructResponse,
+func generateSignature(t *onet.TreeNodeInstance, publics []kyber.Point, structResponses []StructResponse,
 	msg []byte, ok bool) (kyber.Point, *Mask, error) {
 
 	if t == nil {
@@ -33,7 +34,7 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 	var masks [][]byte
 
 	for _, r := range structResponses {
-		atmp, err := signedByteSliceToPoint(ps, r.CoSiReponse)
+		atmp, err := signedByteSliceToPoint(r.CoSiReponse)
 		_ = err
 		signatures = append(signatures, atmp)
 		masks = append(masks, r.Mask)
@@ -41,7 +42,7 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 
 	//generate personal mask
 	self_keypair := globalKeyPairs[t.Index()]
-	personalMask, err := NewMask(ps, publics, self_keypair.Public)
+	personalMask, err := NewMask(pairing_suite, publics, self_keypair.Public)
 
 	if !ok {
 		var found bool
@@ -59,27 +60,27 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 	masks = append(masks, personalMask.Mask())
 
 	// generate personal signature and append to other sigs
-	personalSig, err := bls.Sign(ps, self_keypair.Private, msg)
+	personalSig, err := bls.Sign(pairing_suite, self_keypair.Private, msg)
 
 	if err != nil {
 		return nil, nil, err
 	}
-	personalPointSig, err := signedByteSliceToPoint(ps, personalSig)
+	personalPointSig, err := signedByteSliceToPoint(personalSig)
 	if !ok {
-		personalPointSig = ps.G1().Point()
+		personalPointSig = pairing_suite.G1().Point()
 	}
 
 	signatures = append(signatures, personalPointSig)
 
 	// Aggregate all signatures
-	aggSignature, aggMask, err := aggregateSignatures(ps, signatures, masks)
+	aggSignature, aggMask, err := aggregateSignatures(signatures, masks)
 	if err != nil {
 		log.Lvl3(t.ServerIdentity().Address, "failed to create aggregate signature")
 		return nil, nil, err
 	}
 
 	//create final aggregated mask
-	finalMask, err := NewMask(ps, publics, nil)
+	finalMask, err := NewMask(pairing_suite, publics, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -93,8 +94,8 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 	return aggSignature, finalMask, nil
 }
 
-func signedByteSliceToPoint(ps pairing.Suite, sig []byte) (kyber.Point, error) {
-	pointSig := ps.G1().Point()
+func signedByteSliceToPoint(sig []byte) (kyber.Point, error) {
+	pointSig := pairing_suite.G1().Point()
 
 	if err := pointSig.UnmarshalBinary(sig); err != nil {
 		return nil, err
@@ -103,7 +104,7 @@ func signedByteSliceToPoint(ps pairing.Suite, sig []byte) (kyber.Point, error) {
 	return pointSig, nil
 }
 
-func PointToByteSlice(ps pairing.Suite, sig kyber.Point) ([]byte, error) {
+func PointToByteSlice(sig kyber.Point) ([]byte, error) {
 	byteSig, err := sig.MarshalBinary()
 	if err != nil {
 		return nil, err
@@ -112,14 +113,34 @@ func PointToByteSlice(ps pairing.Suite, sig kyber.Point) ([]byte, error) {
 	return byteSig, nil
 }
 
+func publicByteSliceToPoint(public []byte) (kyber.Point, error) {
+	pointPublic := pairing_suite.G2().Point()
+
+	if err := pointPublic.UnmarshalBinary(public); err != nil {
+		return nil, err
+	}
+
+	return pointPublic, nil
+
+}
+
+func PublicKeyToByteSlice(public kyber.Point) ([]byte, error) {
+	bytePublic, err := public.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+
+	return bytePublic, nil
+}
+
 // AggregateResponses returns the sum of given responses.
 // TODO add mask data?
-func aggregateSignatures(suite pairing.Suite, signatures []kyber.Point, masks [][]byte) (sum kyber.Point, sig []byte, err error) {
+func aggregateSignatures(signatures []kyber.Point, masks [][]byte) (sum kyber.Point, sig []byte, err error) {
 	if signatures == nil {
 		return nil, nil, fmt.Errorf("no signatures provided")
 	}
 	aggMask := make([]byte, len(masks[0]))
-	r := suite.G1().Point()
+	r := pairing_suite.G1().Point()
 
 	for i, signature := range signatures {
 
@@ -138,7 +159,7 @@ func AppendSigAndMask(signature []byte, mask *Mask) []byte {
 
 // Verify checks the given cosignature on the provided message using the list
 // of public keys and cosigning policy.
-func Verify(suite pairing.Suite, publics []kyber.Point, message, sig []byte, policy Policy) error {
+func Verify(publics []kyber.Point, message, sig []byte, policy Policy) error {
 	if publics == nil {
 		return errors.New("no public keys provided")
 	}
@@ -149,11 +170,11 @@ func Verify(suite pairing.Suite, publics []kyber.Point, message, sig []byte, pol
 		return errors.New("no signature provided")
 	}
 
-	lenCom := suite.G1().PointLen()
+	lenCom := pairing_suite.G1().PointLen()
 	signature := sig[:lenCom]
 
 	// Unpack the participation mask and get the aggregate public key
-	mask, err := NewMask(suite, publics, nil)
+	mask, err := NewMask(pairing_suite, publics, nil)
 	if err != nil {
 		return err
 	}
@@ -162,7 +183,7 @@ func Verify(suite pairing.Suite, publics []kyber.Point, message, sig []byte, pol
 
 	pks := mask.AggregatePublic
 
-	err = bls.Verify(suite, pks, message, signature)
+	err = bls.Verify(pairing_suite, pks, message, signature)
 	if err != nil {
 		return fmt.Errorf("didn't get a valid signature: %s", err)
 	} else {

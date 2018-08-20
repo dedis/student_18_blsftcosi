@@ -9,7 +9,9 @@ import (
 	"github.com/dedis/kyber"
 	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/kyber/pairing/bn256"
+	"github.com/dedis/kyber/sign/bls"
 	"github.com/dedis/kyber/util/key"
+	"github.com/dedis/kyber/util/random"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
@@ -43,7 +45,7 @@ type BlsFtCosi struct {
 	Timeout        time.Duration
 	FinalSignature chan []byte // final signature that is sent back to client
 
-	publics         []kyber.Point // list of public keys
+	publics         []kyber.Point
 	stoppedOnce     sync.Once
 	subProtocols    []*SubBlsFtCosi
 	startChan       chan bool
@@ -76,16 +78,25 @@ func GlobalRegisterDefaultProtocols() {
 // NewFtCosi method is used to define the ftcosi protocol.
 func NewBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName string, suite pairing.Suite) (onet.ProtocolInstance, error) {
 
+	// Populate globalKeyPairs. TODO - To be replaced by service later
+	globalKeyPairs = make([]key.Pair, len(n.Roster().List))
+	publics := make([]kyber.Point, len(n.Roster().List))
+	for i, server_iden := range n.Roster().List {
+		private, public := bls.NewKeyPair(suite, random.New())
+		globalKeyPairs[i] = key.Pair{Private: private, Public: public}
+		publics[i] = public
+		log.Lvl3(server_iden, "Index is", i, "Key pair gen", public)
+	}
+
 	c := &BlsFtCosi{
 		TreeNodeInstance: n,
 		FinalSignature:   make(chan []byte, 1),
 		Data:             make([]byte, 0),
-		// TODO: change to read publics from globalKeyPair
-		publics:         n.Roster().Publics(),
-		startChan:       make(chan bool, 1),
-		verificationFn:  vf,
-		subProtocolName: subProtocolName,
-		suite:           suite,
+		publics:          publics,
+		startChan:        make(chan bool, 1),
+		verificationFn:   vf,
+		subProtocolName:  subProtocolName,
+		suite:            suite,
 	}
 
 	return c, nil

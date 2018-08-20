@@ -8,7 +8,6 @@ import (
 
 	"github.com/dedis/kyber"
 	"github.com/dedis/kyber/pairing"
-	"github.com/dedis/kyber/pairing/bn256"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 )
@@ -49,7 +48,7 @@ type SubBlsFtCosi struct {
 // with an always-true verification.
 func NewDefaultSubProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	vf := func(a, b []byte) bool { return true }
-	return NewSubBlsFtCosi(n, vf, bn256.NewSuite())
+	return NewSubBlsFtCosi(n, vf, ThePairingSuite)
 }
 
 // NewSubFtCosi is used to define the subprotocol and to register
@@ -191,6 +190,7 @@ func (p *SubBlsFtCosi) Dispatch() error {
 		}
 
 		// Generate own signature and aggregate with all children signatures
+		log.Lvl3(p.ServerIdentity(), "Index is", p.Index(), "Key pair is", globalKeyPairs[p.Index()])
 		signaturePoint, finalMask, err := generateSignature(p.suite, p.TreeNodeInstance, p.Publics, responses, p.Msg, ok)
 
 		if err != nil {

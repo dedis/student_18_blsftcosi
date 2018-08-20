@@ -40,12 +40,13 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 	}
 
 	//generate personal mask
-	personalMask, err := NewMask(ps, publics, t.Public())
+	self_keypair := globalKeyPairs[t.Index()]
+	personalMask, err := NewMask(ps, publics, self_keypair.Public)
 
 	if !ok {
 		var found bool
 		for i, p := range publics {
-			if p.Equal(t.Public()) {
+			if p.Equal(self_keypair.Public) {
 				personalMask.SetBit(i, false)
 				found = true
 			}
@@ -58,7 +59,7 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 	masks = append(masks, personalMask.Mask())
 
 	// generate personal signature and append to other sigs
-	personalSig, err := bls.Sign(ps, t.Private(), msg)
+	personalSig, err := bls.Sign(ps, self_keypair.Private, msg)
 
 	if err != nil {
 		return nil, nil, err

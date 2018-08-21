@@ -390,11 +390,7 @@ func TestProtocolRefuseOne(t *testing.T) {
 			if nSubtrees >= nNodes && nSubtrees > 1 {
 				continue
 			}
-			//TODO- We still do not allow for the entire subtree to fail so test only when nodesPerSubtree > 1
-			nodesPerSubtree := (nNodes - 1) / nSubtrees
-			if nodesPerSubtree <= 1 {
-				continue
-			}
+
 			for refuseIdx := 1; refuseIdx < nNodes; refuseIdx++ {
 				log.Lvl2("test asking for", nNodes, "nodes and", nSubtrees, "subtrees. "+
 					"Node", refuseIdx, "will refuse.")

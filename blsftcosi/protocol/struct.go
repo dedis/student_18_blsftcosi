@@ -34,10 +34,11 @@ func (m *blsftCosiSuite) RandomStream() cipher.Stream {
 
 // Announcement is the blsftcosi annoucement message
 type Announcement struct {
-	Msg     []byte // statement to be signed
-	Data    []byte
-	Publics [][]byte
-	Timeout time.Duration
+	Msg       []byte // statement to be signed
+	Data      []byte
+	Publics   [][]byte
+	Timeout   time.Duration
+	Threshold int
 }
 
 // StructAnnouncement just contains Announcement and the data necessary to identify and
@@ -51,6 +52,7 @@ type StructAnnouncement struct {
 type Response struct {
 	CoSiReponse []byte
 	Mask        []byte
+	NRefusal    int
 }
 
 // StructResponse just contains Response and the data necessary to identify and

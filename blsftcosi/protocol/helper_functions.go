@@ -133,6 +133,48 @@ func PublicKeyToByteSlice(public kyber.Point) ([]byte, error) {
 	return bytePublic, nil
 }
 
+func aggregateResponses(publics []kyber.Point,
+	structResponses []StructResponse) (kyber.Point, *Mask, error) {
+	if publics == nil {
+		return nil, nil, fmt.Errorf("publics should not be nil, but is")
+	} else if structResponses == nil {
+		return nil, nil, fmt.Errorf("structCommitments should not be nil, but is")
+	}
+
+	// extract lists of responses and masks
+	var signatures []kyber.Point
+	var masks [][]byte
+
+	for _, r := range structResponses {
+		atmp, err := signedByteSliceToPoint(r.CoSiReponse)
+		_ = err
+		signatures = append(signatures, atmp)
+		masks = append(masks, r.Mask)
+	}
+
+	// create final aggregated mask
+	finalMask, err := NewMask(pairing_suite, publics, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	aggResponse := pairing_suite.G1().Point()
+	aggMask := finalMask.Mask()
+	if len(masks) > 0 {
+		//aggregate responses and masks
+		aggResponse, aggMask, err = aggregateSignatures(signatures, masks)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	err = finalMask.SetMask(aggMask)
+	if err != nil {
+		return nil, nil, err
+	}
+	return aggResponse, finalMask, nil
+}
+
 // AggregateResponses returns the sum of given responses.
 // TODO add mask data?
 func aggregateSignatures(signatures []kyber.Point, masks [][]byte) (sum kyber.Point, sig []byte, err error) {

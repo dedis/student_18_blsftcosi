@@ -27,6 +27,7 @@ type SubBlsFtCosi struct {
 	Msg            []byte
 	Data           []byte
 	Timeout        time.Duration
+	Threshold      int
 	stoppedOnce    sync.Once
 	verificationFn VerificationFn
 	suite          cosi.Suite
@@ -52,6 +53,17 @@ func NewDefaultSubProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, err
 // the channels where the messages will be received.
 func NewSubBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, suite cosi.Suite) (onet.ProtocolInstance, error) {
 
+	// tests if it's a three level tree
+	moreThreeLevel := false
+	n.Tree().Root.Visit(0, func(depth int, n *onet.TreeNode) {
+		if depth > 2 {
+			moreThreeLevel = true
+		}
+	})
+	if moreThreeLevel {
+		return nil, fmt.Errorf("subBlsFtCosi launched with a more than three level tree")
+	}
+
 	c := &SubBlsFtCosi{
 		TreeNodeInstance: n,
 		verificationFn:   vf,
@@ -59,8 +71,8 @@ func NewSubBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, suite cosi.Sui
 	}
 
 	if n.IsRoot() {
-		c.subleaderNotResponding = make(chan bool)
-		c.subResponse = make(chan StructResponse, 1)
+		c.subleaderNotResponding = make(chan bool, 1)
+		c.subResponse = make(chan StructResponse, 2) // can send 2 responses
 	}
 
 	err := c.RegisterChannels(&c.ChannelAnnouncement, &c.ChannelResponse)
@@ -82,10 +94,10 @@ func (p *SubBlsFtCosi) Dispatch() error {
 			if err != nil {
 				log.Error("error while broadcasting stopping message:", err)
 			}
-			log.Lvl2("Broadcasting stop", p.ServerIdentity())
 		}
 		p.Done()
 	}()
+	var err error
 	var channelOpen bool
 
 	// ----- Announcement -----
@@ -93,7 +105,6 @@ func (p *SubBlsFtCosi) Dispatch() error {
 	for {
 		announcement, channelOpen = <-p.ChannelAnnouncement
 		if !channelOpen {
-			log.Lvl2("Channel closed", p.ServerIdentity())
 			return nil
 		}
 		if !isValidSender(announcement.TreeNode, p.Parent(), p.TreeNode()) {
@@ -117,17 +128,40 @@ func (p *SubBlsFtCosi) Dispatch() error {
 	}
 	p.Msg = announcement.Msg
 	p.Data = announcement.Data
+	p.Threshold = announcement.Threshold
 
-	verifyChan := make(chan bool, 1)
+	// verify that threshold is valid
+	maxThreshold := p.Tree().Size() - 1
+	if p.Threshold > maxThreshold {
+		return fmt.Errorf("threshold %d bigger than the maximum of responses this subtree can gather (%d)", p.Threshold, maxThreshold)
+	}
+
+	// Unmarshal public keys
+	publics := make([]kyber.Point, len(p.Publics))
+	for i, public := range p.Publics {
+		publics[i], err = publicByteSliceToPoint(public)
+		if err != nil {
+			return err
+		}
+	}
+	// start the verification in background if I'm not the root because
+	// root does the verification in the main protocol
 	if !p.IsRoot() {
 		go func() {
-			log.Lvl3(p.ServerIdentity(), "starting verification Non-root")
-			verifyChan <- p.verificationFn(p.Msg, p.Data)
+			log.Lvl3(p.ServerIdentity(), "starting verification in the background")
+			verificationOk := p.verificationFn(p.Msg, p.Data)
+			personalResponse, err := p.getResponse(verificationOk, publics)
+			if err != nil {
+				log.Error("error while generating own commitment:", err)
+				return
+			}
+			p.ChannelResponse <- personalResponse
+			log.Lvl3(p.ServerIdentity(), "verification done:", verificationOk)
 		}()
 	}
 
 	if !p.IsLeaf() {
-		// Only send commits if the node has children
+		// Only send messages if the node has children
 		go func() {
 			if errs := p.SendToChildrenInParallel(&announcement.Announcement); len(errs) > 0 {
 				log.Error(p.ServerIdentity(), "failed to send announcement to all children, trying to continue")
@@ -135,96 +169,168 @@ func (p *SubBlsFtCosi) Dispatch() error {
 		}()
 	}
 
+	// ----- Response -----
 	// Collect all responses from children, store them and wait till all have responded or timed out.
-	responses := make([]StructResponse, 0)
+	var responses = make([]StructResponse, 0)                       // list of received responses
+	var nodesCanRespond = make([]*onet.TreeNode, len(p.Children())) // the list of nodes that can respond. Nodes will be removed from the list once they respond.
+
+	var NRefusal = 0              // number of refusal received. Will be used only for the subleader
+	var firstResponseSent = false // to avoid sending the quick response multiple times
+	var t = time.After(p.Timeout) // the timeout
+
+	copy(nodesCanRespond, p.Children())
 	if p.IsRoot() {
-		select { // one commitment expected from super-protocol
+		nodesCanRespond = append(nodesCanRespond, p.Children()...) // every node can send quick and final answer
+	} else {
+		nodesCanRespond = append(nodesCanRespond, p.TreeNode()) // can have its own response
+	}
+
+loop:
+	for {
+		select {
 		case response, channelOpen := <-p.ChannelResponse:
 			if !channelOpen {
 				return nil
 			}
-			responses = append(responses, response)
-		case <-time.After(p.Timeout):
-			// the timeout here should be shorter than the main protocol timeout
-			// because main protocol waits on the channel below
 
-			p.subleaderNotResponding <- true
-			return nil
-		}
-	} else {
-		t := time.After(p.Timeout)
-	loop:
-		// note that this section will not execute if it's on a leaf
-		for range p.Children() {
-			select {
-			case response, channelOpen := <-p.ChannelResponse:
-				if !channelOpen {
-					break loop
-				}
-				responses = append(responses, response)
-			case <-t:
-				break loop
+			if !isValidSender(response.TreeNode, nodesCanRespond...) {
+				log.Warn(p.ServerIdentity(), "received a Response from node", response.ServerIdentity,
+					"that is not in the list of nodes that can still respond, ignored")
+				break // discards it
+
 			}
-		}
-	}
+			nodesCanRespond = remove(nodesCanRespond, response.TreeNode)
 
-	var ok bool
+			if p.IsRoot() {
+				// send response to super-protocol
+				p.subResponse <- response
 
-	if p.IsRoot() {
-		// send response to super-protocol
-		if len(responses) != 1 {
-			return fmt.Errorf(
-				"root node in subprotocol should have received 1 signature response, but received %v",
-				len(responses))
-		}
-		p.subResponse <- responses[0]
-	} else {
+				// deactivate timeout
+				t = make(chan time.Time)
+			} else {
 
-		ok = <-verifyChan
-		// unset the mask if the verification failed and remove commitment
-		if !ok {
-			log.Lvl2(p.ServerIdentity().Address, "verification failed, unsetting the mask")
-		}
+				// verify mask of the received response
+				verificationMask, err := NewMask(ThePairingSuite, publics, nil)
+				if err != nil {
+					return err
+				}
+				err = verificationMask.SetMask(response.Mask)
+				if err != nil {
+					return err
+				}
+				if verificationMask.CountEnabled() > 1 {
+					log.Warn(p.ServerIdentity(), "received response with ill-formed mask in non-root node: has",
+						verificationMask.CountEnabled(), "nodes enabled instead of 0 or 1, ignored")
+					break
+				}
 
-		// Unmarshal public keys
-		var err error
-		publics := make([]kyber.Point, len(p.Publics))
-		for i, public := range p.Publics {
-			publics[i], err = publicByteSliceToPoint(public)
+				// check if response is a refusal or acceptance
+				sign, _ := signedByteSliceToPoint(response.CoSiReponse)
+				if sign.Equal(ThePairingSuite.G1().Point()) { // refusal
+					NRefusal++
+					if p.IsLeaf() {
+						log.Warn(p.ServerIdentity(), "leaf refused Response, marking as not signed")
+						return p.sendAggregatedResponses(publics, []StructResponse{}, 1)
+					}
+					log.Warn(p.ServerIdentity(), "non-leaf got refusal")
+				} else {
+					//accepted
+					responses = append(responses, response)
+				}
+
+				thresholdRefusal := (1 + len(p.Children()) - p.Threshold) + 1
+
+				// checks if threshold is reached or unreachable
+				quickAnswer := !firstResponseSent &&
+					(len(responses) >= p.Threshold || // quick valid answer
+						NRefusal >= thresholdRefusal) // quick refusal answer
+
+				// checks if every child and himself responded
+				finalAnswer := len(responses)+NRefusal == len(p.Children())+1
+
+				if quickAnswer || finalAnswer {
+
+					err = p.sendAggregatedResponses(publics, responses, NRefusal)
+					if err != nil {
+						return err
+					}
+
+					// deactivate timeout if final response
+					if finalAnswer {
+						break loop
+					}
+
+					firstResponseSent = true
+				}
+
+				// security check
+				if len(responses)+NRefusal > maxThreshold {
+					log.Error(p.ServerIdentity(), "more responses (", len(responses),
+						") and refusals (", NRefusal, ") than possible in subleader (", maxThreshold, ")")
+				}
+			}
+		case <-t:
+			if p.IsRoot() {
+				log.Warn(p.ServerIdentity(), "timed out while waiting for subleader response")
+				p.subleaderNotResponding <- true
+				return nil
+			}
+			log.Warn(p.ServerIdentity(), "timed out while waiting for commits, got", len(responses), "commitments and", NRefusal, "refusals")
+
+			// sending responses received
+			// TODO - Only send if there are newer responses
+			err = p.sendAggregatedResponses(publics, responses, NRefusal)
 			if err != nil {
 				return err
 			}
-		}
-
-		// Generate own signature and aggregate with all children signatures
-		signaturePoint, finalMask, err := generateSignature(p.TreeNodeInstance, publics, responses, p.Msg, ok)
-
-		if err != nil {
-			return err
-		}
-
-		tmp, err := PointToByteSlice(signaturePoint)
-
-		// TODO - Investigate why below line was added
-		/*
-			if !ok {
-				return errors.New("stopping because we won't send to parent")
-			}*/
-
-		response := &Response{CoSiReponse: tmp, Mask: finalMask.mask}
-		log.Lvl2("Sending response", response, "from", p.ServerIdentity().Address, "to", p.Parent().ServerIdentity.Address)
-		err = p.SendToParent(response)
-		if err != nil {
-			return err
+			break loop
 		}
 	}
 
 	return nil
 }
 
+func (p *SubBlsFtCosi) sendAggregatedResponses(publics []kyber.Point, responses []StructResponse, NRefusal int) error {
+
+	// aggregate responses
+	responsePoint, mask, err := aggregateResponses(publics, responses)
+	if err != nil {
+		return err
+	}
+
+	response, err := responsePoint.MarshalBinary()
+	if err != nil {
+		return err
+	}
+
+	// send to parent
+	err = p.SendToParent(&Response{response, mask.Mask(), NRefusal})
+	if err != nil {
+		return err
+	}
+
+	log.Lvl3(p.ServerIdentity(), "response sent with", mask.CountEnabled(), "accepted and", NRefusal, "refusals")
+
+	return nil
+}
+
+// HandleStop is called when a Stop message is send to this node.
+// It broadcasts the message to all the nodes in tree and each node will stop
+// the protocol by calling p.Done.
+func (p *SubBlsFtCosi) HandleStop(stop StructStop) error {
+	if !isValidSender(stop.TreeNode, p.Root()) {
+		log.Warn(p.ServerIdentity(), "received a Stop from node", stop.ServerIdentity,
+			"that is not the root, ignored")
+	}
+	log.Lvl3("Received stop", p.ServerIdentity())
+	close(p.ChannelAnnouncement)
+	// close(p.ChannelResponse) // Channel left open to allow verification function to safely return
+	return nil
+}
+
 // Start is done only by root and starts the subprotocol
 func (p *SubBlsFtCosi) Start() error {
-	log.Lvl3(p.ServerIdentity().Address, "Starting subCoSi")
+	log.Lvl3(p.ServerIdentity(), "Starting subCoSi")
 	if p.Msg == nil {
 		return errors.New("subprotocol does not have a proposal msg")
 	}
@@ -240,27 +346,53 @@ func (p *SubBlsFtCosi) Start() error {
 	if p.Timeout < 10*time.Nanosecond {
 		return errors.New("unrealistic timeout")
 	}
+	if p.Threshold > p.Tree().Size() {
+		return errors.New("threshold bigger than number of nodes in subtree")
+	}
+	if p.Threshold < 1 {
+		return fmt.Errorf("threshold of %d smaller than one node", p.Threshold)
+	}
 
 	announcement := StructAnnouncement{
 		p.TreeNode(),
-		Announcement{p.Msg, p.Data, p.Publics, p.Timeout},
+		Announcement{p.Msg, p.Data, p.Publics, p.Timeout, p.Threshold},
 	}
 	p.ChannelAnnouncement <- announcement
 	return nil
 }
 
-// HandleStop is called when a Stop message is send to this node.
-// It broadcasts the message to all the nodes in tree and each node will stop
-// the protocol by calling p.Done.
-func (p *SubBlsFtCosi) HandleStop(stop StructStop) error {
-	if !isValidSender(stop.TreeNode, p.Root()) {
-		log.Warn(p.ServerIdentity(), "received a Stop from node", stop.ServerIdentity,
-			"that is not the root, ignored")
+// generates a response.
+// the boolean indicates whether the response is a proposal acceptance or a proposal refusal.
+// Returns the response and an error if there was a problem in the process.
+func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point) (StructResponse, error) {
+
+	emptyMask, err := NewMask(ThePairingSuite, publics, nil)
+	if err != nil {
+		return StructResponse{}, err
 	}
-	log.Lvl3("Received stop", p.ServerIdentity())
-	close(p.ChannelAnnouncement)
-	close(p.ChannelResponse)
-	return nil
+
+	sig, err := PointToByteSlice(ThePairingSuite.G1().Point())
+	if err != nil {
+		return StructResponse{}, err
+	}
+
+	structResponse := StructResponse{p.TreeNode(),
+		Response{sig, emptyMask.Mask(), 0}}
+
+	if accepts {
+		var personalMask *Mask
+		self_keypair := globalKeyPairs[p.Index()]
+		personalMask, err := NewMask(ThePairingSuite, publics, self_keypair.Public)
+		if err != nil {
+			return StructResponse{}, err
+		}
+		structResponse.Mask = personalMask.Mask()
+
+	} else { // refuses
+		structResponse.NRefusal++
+	}
+
+	return structResponse, nil
 }
 
 // checks if a node is in a list of nodes
@@ -275,4 +407,14 @@ func isValidSender(node *onet.TreeNode, valids ...*onet.TreeNode) bool {
 		}
 	}
 	return isValid
+}
+
+// removes the first instance of a node from a slice
+func remove(nodesList []*onet.TreeNode, node *onet.TreeNode) []*onet.TreeNode {
+	for i, iNode := range nodesList {
+		if iNode.Equal(node) {
+			return append(nodesList[:i], nodesList[i+1:]...)
+		}
+	}
+	return nodesList
 }

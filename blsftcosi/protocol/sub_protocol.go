@@ -8,6 +8,7 @@ import (
 
 	"github.com/dedis/cothority"
 	"github.com/dedis/kyber"
+	"github.com/dedis/kyber/sign/bls"
 	"github.com/dedis/kyber/sign/cosi"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
@@ -366,32 +367,36 @@ func (p *SubBlsFtCosi) Start() error {
 // Returns the response and an error if there was a problem in the process.
 func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point) (StructResponse, error) {
 
-	emptyMask, err := NewMask(ThePairingSuite, publics, nil)
+	personalMask, err := NewMask(ThePairingSuite, publics, nil)
 	if err != nil {
 		return StructResponse{}, err
 	}
 
-	sig, err := PointToByteSlice(ThePairingSuite.G1().Point())
+	personalSig, err := PointToByteSlice(ThePairingSuite.G1().Point())
 	if err != nil {
 		return StructResponse{}, err
 	}
 
-	structResponse := StructResponse{p.TreeNode(),
-		Response{sig, emptyMask.Mask(), 0}}
+	NRefusal := 0
 
 	if accepts {
-		var personalMask *Mask
 		self_keypair := globalKeyPairs[p.Index()]
-		personalMask, err := NewMask(ThePairingSuite, publics, self_keypair.Public)
+		personalMask, err = NewMask(ThePairingSuite, publics, self_keypair.Public)
 		if err != nil {
 			return StructResponse{}, err
 		}
-		structResponse.Mask = personalMask.Mask()
+
+		personalSig, err = bls.Sign(ThePairingSuite, self_keypair.Private, p.Msg)
+		if err != nil {
+			return StructResponse{}, err
+		}
 
 	} else { // refuses
-		structResponse.NRefusal++
+		NRefusal++
 	}
 
+	structResponse := StructResponse{p.TreeNode(),
+		Response{personalSig, personalMask.Mask(), NRefusal}}
 	return structResponse, nil
 }
 

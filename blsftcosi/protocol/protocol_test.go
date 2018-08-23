@@ -80,6 +80,7 @@ func TestProtocol(t *testing.T) {
 			cosiProtocol.Msg = proposal
 			cosiProtocol.NSubtrees = nSubtrees
 			cosiProtocol.Timeout = defaultTimeout
+			cosiProtocol.Threshold = nNodes
 
 			err = cosiProtocol.Start()
 			if err != nil {
@@ -98,11 +99,75 @@ func TestProtocol(t *testing.T) {
 			}
 
 			// get and verify signature
-			err = getAndVerifySignature(cosiProtocol, publics, proposal, CompletePolicy{})
+			_, err = getAndVerifySignature(cosiProtocol, publics, proposal, CompletePolicy{})
 			if err != nil {
 				local.CloseAll()
 				t.Fatal(err)
 			}
+
+			local.CloseAll()
+		}
+	}
+}
+
+// Tests various trees configurations
+func TestProtocolQuickAnswer(t *testing.T) {
+	nodes := []int{2, 5, 13, 24}
+	subtrees := []int{1, 2, 5, 9}
+	proposal := []byte{0xFF}
+
+	for _, nNodes := range nodes {
+		for _, nSubtrees := range subtrees {
+			if nSubtrees >= nNodes && nSubtrees > 1 {
+				continue
+			}
+			threshold := nNodes / 2
+			log.Lvl2("test asking for", nNodes, "node(s),", nSubtrees, "subtree(s) and a", threshold, "node(s) threshold")
+
+			local := onet.NewLocalTest(testSuite)
+			_, _, tree := local.GenTree(nNodes, false)
+
+			pi, err := local.CreateProtocol(DefaultProtocolName, tree)
+			if err != nil {
+				local.CloseAll()
+				t.Fatal("Error in creation of protocol:", err)
+			}
+			cosiProtocol := pi.(*BlsFtCosi)
+			cosiProtocol.CreateProtocol = local.CreateProtocol
+			cosiProtocol.Msg = proposal
+			cosiProtocol.NSubtrees = nSubtrees
+			cosiProtocol.Timeout = defaultTimeout
+			cosiProtocol.Threshold = threshold
+
+			err = cosiProtocol.Start()
+			if err != nil {
+				local.CloseAll()
+				t.Fatal(err)
+			}
+
+			// Unmarshal public keys
+			publics := make([]kyber.Point, len(cosiProtocol.publics))
+			for i, public := range cosiProtocol.publics {
+				publics[i], err = publicByteSliceToPoint(public)
+				if err != nil {
+					local.CloseAll()
+					t.Fatal(err)
+				}
+			}
+
+			// get and verify signature
+			sig, err := getAndVerifySignature(cosiProtocol, publics, proposal, NewThresholdPolicy(threshold))
+			if err != nil {
+				local.CloseAll()
+				t.Fatal(err)
+			}
+
+			mask, err := NewMask(cosigningSuite, publics, nil)
+			require.Nil(t, err)
+			lenRes := cosigningSuite.PointLen() + cosigningSuite.ScalarLen()
+			mask.SetMask(sig[lenRes:])
+			// Test that we have less than nNodes signatures
+			require.NotEqual(t, nNodes, mask.CountEnabled())
 
 			local.CloseAll()
 		}
@@ -123,24 +188,13 @@ func TestUnresponsiveLeafs(t *testing.T) {
 			servers, roster, tree := local.GenTree(nNodes, false)
 			require.NotNil(t, roster)
 
-			// create protocol
-			pi, err := local.CreateProtocol(DefaultProtocolName, tree)
-			if err != nil {
-				local.CloseAll()
-				t.Fatal("Error in creation of protocol:", err)
-			}
-			cosiProtocol := pi.(*BlsFtCosi)
-			cosiProtocol.CreateProtocol = local.CreateProtocol
-			cosiProtocol.Msg = proposal
-			cosiProtocol.NSubtrees = nSubtrees
-			cosiProtocol.Timeout = defaultTimeout
-
 			// find first subtree leaves servers based on GenTree function
 			leafsServerIdentities, err := GetLeafsIDs(tree, 0, nNodes, nSubtrees)
 			if err != nil {
 				t.Fatal(err)
 			}
 			failing := (len(leafsServerIdentities) - 1) / 3 // we render unresponsive one third of leafs
+			threshold := nNodes - failing
 			failingLeafsServerIdentities := leafsServerIdentities[:failing]
 			firstLeavesServers := make([]*onet.Server, 0)
 			for _, s := range servers {
@@ -156,6 +210,19 @@ func TestUnresponsiveLeafs(t *testing.T) {
 			for _, l := range firstLeavesServers {
 				l.Pause()
 			}
+
+			// create protocol
+			pi, err := local.CreateProtocol(DefaultProtocolName, tree)
+			if err != nil {
+				local.CloseAll()
+				t.Fatal("Error in creation of protocol:", err)
+			}
+			cosiProtocol := pi.(*BlsFtCosi)
+			cosiProtocol.CreateProtocol = local.CreateProtocol
+			cosiProtocol.Msg = proposal
+			cosiProtocol.NSubtrees = nSubtrees
+			cosiProtocol.Timeout = defaultTimeout
+			cosiProtocol.Threshold = threshold
 
 			// start protocol
 			err = cosiProtocol.Start()
@@ -175,8 +242,7 @@ func TestUnresponsiveLeafs(t *testing.T) {
 			}
 
 			// get and verify signature
-			threshold := nNodes - failing
-			err = getAndVerifySignature(cosiProtocol, publics, proposal, NewThresholdPolicy(threshold))
+			_, err = getAndVerifySignature(cosiProtocol, publics, proposal, NewThresholdPolicy(threshold))
 			if err != nil {
 				local.CloseAll()
 				t.Fatal(err)
@@ -189,7 +255,7 @@ func TestUnresponsiveLeafs(t *testing.T) {
 
 // Tests unresponsive subleaders in various tree configurations
 func TestUnresponsiveSubleader(t *testing.T) {
-	nodes := []int{6, 13, 24}
+	nodes := []int{3, 13, 24}
 	subtrees := []int{1, 2}
 	proposal := []byte{0xFF}
 
@@ -199,18 +265,6 @@ func TestUnresponsiveSubleader(t *testing.T) {
 
 			local := onet.NewLocalTest(testSuite)
 			servers, _, tree := local.GenTree(nNodes, false)
-
-			// create protocol
-			pi, err := local.CreateProtocol(DefaultProtocolName, tree)
-			if err != nil {
-				local.CloseAll()
-				t.Fatal("Error in creation of protocol:", err)
-			}
-			cosiProtocol := pi.(*BlsFtCosi)
-			cosiProtocol.CreateProtocol = local.CreateProtocol
-			cosiProtocol.Msg = proposal
-			cosiProtocol.NSubtrees = nSubtrees
-			cosiProtocol.Timeout = defaultTimeout
 
 			// find first subleader server based on genTree function
 			subleaderIds, err := GetSubleaderIDs(tree, 0, nNodes, nSubtrees)
@@ -232,6 +286,19 @@ func TestUnresponsiveSubleader(t *testing.T) {
 			// pause the first sub leader to simulate failure
 			firstSubleaderServer.Pause()
 
+			// create protocol
+			pi, err := local.CreateProtocol(DefaultProtocolName, tree)
+			if err != nil {
+				local.CloseAll()
+				t.Fatal("Error in creation of protocol:", err)
+			}
+			cosiProtocol := pi.(*BlsFtCosi)
+			cosiProtocol.CreateProtocol = local.CreateProtocol
+			cosiProtocol.Msg = proposal
+			cosiProtocol.NSubtrees = nSubtrees
+			cosiProtocol.Timeout = defaultTimeout
+			cosiProtocol.Threshold = nNodes - 1
+
 			// start protocol
 			err = cosiProtocol.Start()
 			if err != nil {
@@ -250,7 +317,7 @@ func TestUnresponsiveSubleader(t *testing.T) {
 			}
 
 			// get and verify signature
-			err = getAndVerifySignature(cosiProtocol, publics, proposal, NewThresholdPolicy(nNodes-1))
+			_, err = getAndVerifySignature(cosiProtocol, publics, proposal, NewThresholdPolicy(nNodes-1))
 			if err != nil {
 				local.CloseAll()
 				t.Fatal(err)
@@ -269,6 +336,9 @@ func TestProtocolErrors(t *testing.T) {
 
 	for _, nNodes := range nodes {
 		for _, nSubtrees := range subtrees {
+			if nSubtrees >= nNodes && nSubtrees > 1 {
+				continue
+			}
 			log.Lvl2("test asking for", nNodes, "nodes and", nSubtrees, "subtrees")
 
 			local := onet.NewLocalTest(testSuite)
@@ -326,7 +396,7 @@ func TestProtocolRefusalAll(t *testing.T) {
 			if nSubtrees >= nNodes && nSubtrees > 1 {
 				continue
 			}
-			log.Lvl1("test asking for", nNodes, "nodes and", nSubtrees, "subtrees")
+			log.Lvl2("test asking for", nNodes, "nodes and", nSubtrees, "subtrees")
 
 			local := onet.NewLocalTest(testSuite)
 			_, _, tree := local.GenTree(nNodes, false)
@@ -341,6 +411,7 @@ func TestProtocolRefusalAll(t *testing.T) {
 			cosiProtocol.Msg = proposal
 			cosiProtocol.NSubtrees = nSubtrees
 			cosiProtocol.Timeout = defaultTimeout
+			cosiProtocol.Threshold = nNodes / 2
 
 			err = cosiProtocol.Start()
 			if err != nil {
@@ -353,11 +424,11 @@ func TestProtocolRefusalAll(t *testing.T) {
 			var signature []byte
 			select {
 			case signature = <-cosiProtocol.FinalSignature:
-				log.Lvl3("Instance is done", signature)
-			case <-time.After(defaultTimeout * 4):
+				log.Lvl3("Instance is done")
+			case <-time.After(defaultTimeout * 2):
 				// wait a bit longer than the protocol timeout
 				local.CloseAll()
-				t.Fatal("didn't get commitment in time")
+				t.Fatal("didn't get signature in time")
 			}
 
 			// Unmarshal public keys
@@ -390,7 +461,6 @@ func TestProtocolRefuseOne(t *testing.T) {
 			if nSubtrees >= nNodes && nSubtrees > 1 {
 				continue
 			}
-
 			for refuseIdx := 1; refuseIdx < nNodes; refuseIdx++ {
 				log.Lvl2("test asking for", nNodes, "nodes and", nSubtrees, "subtrees. "+
 					"Node", refuseIdx, "will refuse.")
@@ -409,6 +479,7 @@ func TestProtocolRefuseOne(t *testing.T) {
 				cosiProtocol.Msg = proposal
 				cosiProtocol.NSubtrees = nSubtrees
 				cosiProtocol.Timeout = defaultTimeout
+				cosiProtocol.Threshold = nNodes - 1
 
 				err = cosiProtocol.Start()
 				if err != nil {
@@ -422,10 +493,10 @@ func TestProtocolRefuseOne(t *testing.T) {
 				select {
 				case signature = <-cosiProtocol.FinalSignature:
 					log.Lvl3("Instance is done")
-				case <-time.After(defaultTimeout * 50):
+				case <-time.After(defaultTimeout * 2):
 					// wait a bit longer than the protocol timeout
-					log.Lvl3("didn't get commitment in time")
-					t.Fatal("didn't get commitment in time")
+					local.CloseAll()
+					t.Fatal("didn't get signature in time")
 				}
 
 				// Unmarshal public keys
@@ -464,18 +535,19 @@ func TestProtocolRefuseOne(t *testing.T) {
 }
 
 func getAndVerifySignature(cosiProtocol *BlsFtCosi, publics []kyber.Point,
-	proposal []byte, policy Policy) error {
+	proposal []byte, policy Policy) ([]byte, error) {
 	var signature []byte
+	log.Lvl3("Waiting for Instance")
 	select {
 	case signature = <-cosiProtocol.FinalSignature:
 		log.Lvl3("Instance is done")
-	case <-time.After(defaultTimeout * 50):
+	case <-time.After(defaultTimeout * 2):
 		// wait a bit longer than the protocol timeout
-		log.Lvl3("didn't get commitment in time")
-		return fmt.Errorf("didn't get commitment in time")
+		log.Lvl3("Didnt received commitment in time")
+		return nil, fmt.Errorf("didn't get commitment in time")
 	}
 
-	return verifySignature(signature, publics, proposal, policy)
+	return signature, verifySignature(signature, publics, proposal, policy)
 }
 
 func verifySignature(signature []byte, publics []kyber.Point,
@@ -483,10 +555,9 @@ func verifySignature(signature []byte, publics []kyber.Point,
 	// verify signature
 	err := Verify(publics, proposal, signature, policy)
 	if err != nil {
-		log.Lvl2("Err", err)
 		return fmt.Errorf("didn't get a valid signature: %s", err)
 	}
-	log.Lvl2("Signature correctly verified!")
+	log.Lvl3("Signature correctly verified!")
 	return nil
 }
 

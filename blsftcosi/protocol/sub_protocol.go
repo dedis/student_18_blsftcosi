@@ -187,7 +187,7 @@ func (p *SubBlsFtCosi) Dispatch() error {
 	}
 
 loop:
-	for {
+	for len(nodesCanRespond) > 0 {
 		select {
 		case response, channelOpen := <-p.ChannelResponse:
 			if !channelOpen {
@@ -202,23 +202,27 @@ loop:
 			}
 			nodesCanRespond = remove(nodesCanRespond, response.TreeNode)
 
+			// verify mask of the received response
+			verificationMask, err := NewMask(ThePairingSuite, publics, nil)
+			if err != nil {
+				return err
+			}
+			err = verificationMask.SetMask(response.Mask)
+			if err != nil {
+				return err
+			}
+
 			if p.IsRoot() {
 				// send response to super-protocol
 				p.subResponse <- response
 
-				// deactivate timeout
-				t = make(chan time.Time)
+				// Check if the response is the final response
+				if verificationMask.CountEnabled()+response.NRefusal == len(p.List())-1 {
+					log.Lvl2("First response is the final response")
+					return nil
+				}
 			} else {
 
-				// verify mask of the received response
-				verificationMask, err := NewMask(ThePairingSuite, publics, nil)
-				if err != nil {
-					return err
-				}
-				err = verificationMask.SetMask(response.Mask)
-				if err != nil {
-					return err
-				}
 				if verificationMask.CountEnabled() > 1 {
 					log.Warn(p.ServerIdentity(), "received response with ill-formed mask in non-root node: has",
 						verificationMask.CountEnabled(), "nodes enabled instead of 0 or 1, ignored")
@@ -256,7 +260,7 @@ loop:
 						return err
 					}
 
-					// deactivate timeout if final response
+					// return if final response
 					if finalAnswer {
 						break loop
 					}
@@ -287,7 +291,6 @@ loop:
 			break loop
 		}
 	}
-
 	return nil
 }
 

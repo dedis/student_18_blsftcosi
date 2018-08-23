@@ -96,7 +96,7 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree,
 			case res := <-responsesChan:
 				// If there is a response, add to map.
 				// This assumes that the last response of a subtree is the biggest one.
-				// Should this be changed??
+				// TODO- Check if this should be changed??
 				responseMap[res.subProtocol] = res.structResponse
 
 				// check if threshold is reachable

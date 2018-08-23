@@ -441,11 +441,8 @@ func TestProtocolRefusalAll(t *testing.T) {
 				}
 			}
 
-			err = verifySignature(signature, publics, proposal, NewThresholdPolicy(1))
-			if err != nil {
-				local.CloseAll()
-				t.Fatal(err)
-			}
+			require.Nil(t, signature)
+
 			local.CloseAll()
 		}
 	}

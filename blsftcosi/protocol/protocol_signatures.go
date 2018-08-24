@@ -30,7 +30,6 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree,
 	for i, subProtocol := range subProtocols {
 		go func(i int, subProtocol *SubBlsFtCosi) {
 			defer closingWg.Done()
-			log.Lvl2(p.ServerIdentity(), "Timeout for Blsftcosi is", p.Timeout)
 			timeout := time.After(p.Timeout)
 			for {
 				select {
@@ -74,7 +73,9 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree,
 					responsesChan <- responseProtocol{response, subProtocol}
 					timeout = make(chan time.Time) // deactivate timeout
 				case <-timeout:
-					errChan <- fmt.Errorf("(subprotocol %v) didn't get commitment after timeout %v", i, p.Timeout)
+					// This should never happen, as the subProto should return before that
+					// timeout, even if it didn't receive enough responses.
+					errChan <- fmt.Errorf("timeout should not happen while waiting for response: %d", i)
 					return
 				}
 			}

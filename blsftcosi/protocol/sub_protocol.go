@@ -218,7 +218,6 @@ loop:
 
 				// Check if the response is the final response
 				if verificationMask.CountEnabled()+response.NRefusal == len(p.List())-1 {
-					log.Lvl2("First response is the final response")
 					return nil
 				}
 			} else {

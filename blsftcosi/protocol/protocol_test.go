@@ -44,7 +44,7 @@ func init() {
 
 var testSuite = cothority.Suite
 var cosigningSuite = ThePairingSuite
-var defaultTimeout = 10 * time.Second
+var defaultTimeout = 5 * time.Second
 
 func TestMain(m *testing.M) {
 	flag.Parse()
@@ -164,7 +164,7 @@ func TestProtocolQuickAnswer(t *testing.T) {
 
 			mask, err := NewMask(cosigningSuite, publics, nil)
 			require.Nil(t, err)
-			lenRes := cosigningSuite.PointLen() + cosigningSuite.ScalarLen()
+			lenRes := cosigningSuite.G1().PointLen()
 			mask.SetMask(sig[lenRes:])
 			// Test that we have less than nNodes signatures
 			require.NotEqual(t, nNodes, mask.CountEnabled())

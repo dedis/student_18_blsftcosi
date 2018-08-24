@@ -30,7 +30,8 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree,
 	for i, subProtocol := range subProtocols {
 		go func(i int, subProtocol *SubBlsFtCosi) {
 			defer closingWg.Done()
-			timeout := time.After(p.Timeout / 2)
+			log.Lvl2(p.ServerIdentity(), "Timeout for Blsftcosi is", p.Timeout)
+			timeout := time.After(p.Timeout)
 			for {
 				select {
 				case <-closingChan:

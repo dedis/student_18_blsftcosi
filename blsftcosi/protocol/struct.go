@@ -52,8 +52,7 @@ type StructAnnouncement struct {
 type Response struct {
 	CoSiReponse []byte
 	Mask        []byte
-	Refusals    [][]byte
-	//Refusals    map[int][]byte
+	Refusals    map[int][]byte
 }
 
 // StructResponse just contains Response and the data necessary to identify and

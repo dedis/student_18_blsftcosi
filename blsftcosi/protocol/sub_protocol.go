@@ -175,9 +175,10 @@ func (p *SubBlsFtCosi) Dispatch() error {
 	var responses = make([]StructResponse, 0)                       // list of received responses
 	var nodesCanRespond = make([]*onet.TreeNode, len(p.Children())) // the list of nodes that can respond. Nodes will be removed from the list once they respond.
 
-	var Refusals = make([][]byte, 0) // refusals received. Will be used only for the subleader
-	var firstResponseSent = false    // to avoid sending the quick response multiple times
-	var t = time.After(p.Timeout)    // the timeout
+	var Refusals = make(map[int][]byte) // refusals received. Will be used only for the subleader
+
+	var firstResponseSent = false // to avoid sending the quick response multiple times
+	var t = time.After(p.Timeout) // the timeout
 
 	copy(nodesCanRespond, p.Children())
 	if p.IsRoot() {
@@ -213,6 +214,18 @@ loop:
 			}
 
 			if p.IsRoot() {
+
+				// verify the refusals is signed correctly
+				for index, refusal := range response.Refusals {
+					refusalMsg := []byte(fmt.Sprintf("%s:%d", p.Msg, index))
+					refusalPublic := publics[index]
+					err = bls.Verify(ThePairingSuite, refusalPublic, refusalMsg, refusal)
+					// Do not send invalid refusals
+					if err != nil {
+						delete(response.Refusals, index)
+					}
+				}
+
 				// send response to super-protocol
 				p.subResponse <- response
 
@@ -233,7 +246,16 @@ loop:
 				sign, _ := signedByteSliceToPoint(response.CoSiReponse)
 				if sign.Equal(ThePairingSuite.G1().Point()) { // refusal
 					// verify the refusal is signed correctly
-					Refusals = append(Refusals, response.Refusals...)
+					for index, refusal := range response.Refusals {
+						refusalMsg := []byte(fmt.Sprintf("%s:%d", p.Msg, index))
+						refusalPublic := publics[index]
+						err = bls.Verify(ThePairingSuite, refusalPublic, refusalMsg, refusal)
+						// ignore the refusal if not properly signed.
+						if err == nil {
+							Refusals[index] = refusal
+						}
+					}
+
 					if p.IsLeaf() {
 						log.Warn(p.ServerIdentity(), "leaf refused Response, marking as not signed")
 						return p.sendAggregatedResponses(publics, []StructResponse{}, Refusals)
@@ -295,7 +317,7 @@ loop:
 	return nil
 }
 
-func (p *SubBlsFtCosi) sendAggregatedResponses(publics []kyber.Point, responses []StructResponse, Refusals [][]byte) error {
+func (p *SubBlsFtCosi) sendAggregatedResponses(publics []kyber.Point, responses []StructResponse, Refusals map[int][]byte) error {
 
 	// aggregate responses
 	responsePoint, mask, err := aggregateResponses(publics, responses)
@@ -381,7 +403,7 @@ func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point) (StructR
 		return StructResponse{}, err
 	}
 
-	Refusals := make([][]byte, 0)
+	Refusals := make(map[int][]byte)
 
 	self_keypair := globalKeyPairs[p.Index()]
 	if accepts {
@@ -401,7 +423,7 @@ func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point) (StructR
 		if err != nil {
 			return StructResponse{}, err
 		}
-		Refusals = append(Refusals, refusalSig)
+		Refusals[p.Index()] = refusalSig
 	}
 
 	structResponse := StructResponse{p.TreeNode(),

@@ -175,9 +175,9 @@ func (p *SubBlsFtCosi) Dispatch() error {
 	var responses = make([]StructResponse, 0)                       // list of received responses
 	var nodesCanRespond = make([]*onet.TreeNode, len(p.Children())) // the list of nodes that can respond. Nodes will be removed from the list once they respond.
 
-	var NRefusal = 0              // number of refusal received. Will be used only for the subleader
-	var firstResponseSent = false // to avoid sending the quick response multiple times
-	var t = time.After(p.Timeout) // the timeout
+	var Refusals = make([][]byte, 0) // refusals received. Will be used only for the subleader
+	var firstResponseSent = false    // to avoid sending the quick response multiple times
+	var t = time.After(p.Timeout)    // the timeout
 
 	copy(nodesCanRespond, p.Children())
 	if p.IsRoot() {
@@ -217,7 +217,8 @@ loop:
 				p.subResponse <- response
 
 				// Check if the response is the final response
-				if verificationMask.CountEnabled()+response.NRefusal == len(p.List())-1 {
+				// Should we verify if the refusals are correctly signed?
+				if verificationMask.CountEnabled()+len(response.Refusals) == len(p.List())-1 {
 					return nil
 				}
 			} else {
@@ -231,10 +232,11 @@ loop:
 				// check if response is a refusal or acceptance
 				sign, _ := signedByteSliceToPoint(response.CoSiReponse)
 				if sign.Equal(ThePairingSuite.G1().Point()) { // refusal
-					NRefusal++
+					// verify the refusal is signed correctly
+					Refusals = append(Refusals, response.Refusals...)
 					if p.IsLeaf() {
 						log.Warn(p.ServerIdentity(), "leaf refused Response, marking as not signed")
-						return p.sendAggregatedResponses(publics, []StructResponse{}, 1)
+						return p.sendAggregatedResponses(publics, []StructResponse{}, Refusals)
 					}
 					log.Warn(p.ServerIdentity(), "non-leaf got refusal")
 				} else {
@@ -247,14 +249,14 @@ loop:
 				// checks if threshold is reached or unreachable
 				quickAnswer := !firstResponseSent &&
 					(len(responses) >= p.Threshold || // quick valid answer
-						NRefusal >= thresholdRefusal) // quick refusal answer
+						len(Refusals) >= thresholdRefusal) // quick refusal answer
 
 				// checks if every child and himself responded
-				finalAnswer := len(responses)+NRefusal == len(p.Children())+1
+				finalAnswer := len(responses)+len(Refusals) == len(p.Children())+1
 
 				if quickAnswer || finalAnswer {
 
-					err = p.sendAggregatedResponses(publics, responses, NRefusal)
+					err = p.sendAggregatedResponses(publics, responses, Refusals)
 					if err != nil {
 						return err
 					}
@@ -268,9 +270,9 @@ loop:
 				}
 
 				// security check
-				if len(responses)+NRefusal > maxThreshold {
+				if len(responses)+len(Refusals) > maxThreshold {
 					log.Error(p.ServerIdentity(), "more responses (", len(responses),
-						") and refusals (", NRefusal, ") than possible in subleader (", maxThreshold, ")")
+						") and refusals (", len(Refusals), ") than possible in subleader (", maxThreshold, ")")
 				}
 			}
 		case <-t:
@@ -279,11 +281,11 @@ loop:
 				p.subleaderNotResponding <- true
 				return nil
 			}
-			log.Warn(p.ServerIdentity(), "timed out while waiting for commits, got", len(responses), "commitments and", NRefusal, "refusals")
+			log.Warn(p.ServerIdentity(), "timed out while waiting for commits, got", len(responses), "commitments and", len(Refusals), "refusals")
 
 			// sending responses received
 			// TODO - Only send if there are newer responses
-			err = p.sendAggregatedResponses(publics, responses, NRefusal)
+			err = p.sendAggregatedResponses(publics, responses, Refusals)
 			if err != nil {
 				return err
 			}
@@ -293,7 +295,7 @@ loop:
 	return nil
 }
 
-func (p *SubBlsFtCosi) sendAggregatedResponses(publics []kyber.Point, responses []StructResponse, NRefusal int) error {
+func (p *SubBlsFtCosi) sendAggregatedResponses(publics []kyber.Point, responses []StructResponse, Refusals [][]byte) error {
 
 	// aggregate responses
 	responsePoint, mask, err := aggregateResponses(publics, responses)
@@ -307,12 +309,12 @@ func (p *SubBlsFtCosi) sendAggregatedResponses(publics []kyber.Point, responses 
 	}
 
 	// send to parent
-	err = p.SendToParent(&Response{response, mask.Mask(), NRefusal})
+	err = p.SendToParent(&Response{response, mask.Mask(), Refusals})
 	if err != nil {
 		return err
 	}
 
-	log.Lvl3(p.ServerIdentity(), "response sent with", mask.CountEnabled(), "accepted and", NRefusal, "refusals")
+	log.Lvl3(p.ServerIdentity(), "response sent with", mask.CountEnabled(), "accepted and", len(Refusals), "refusals")
 
 	return nil
 }
@@ -379,10 +381,10 @@ func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point) (StructR
 		return StructResponse{}, err
 	}
 
-	NRefusal := 0
+	Refusals := make([][]byte, 0)
 
+	self_keypair := globalKeyPairs[p.Index()]
 	if accepts {
-		self_keypair := globalKeyPairs[p.Index()]
 		personalMask, err = NewMask(ThePairingSuite, publics, self_keypair.Public)
 		if err != nil {
 			return StructResponse{}, err
@@ -394,11 +396,16 @@ func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point) (StructR
 		}
 
 	} else { // refuses
-		NRefusal++
+		refusalMsg := []byte(fmt.Sprintf("%s:%d", p.Msg, p.Index()))
+		refusalSig, err := bls.Sign(ThePairingSuite, self_keypair.Private, refusalMsg)
+		if err != nil {
+			return StructResponse{}, err
+		}
+		Refusals = append(Refusals, refusalSig)
 	}
 
 	structResponse := StructResponse{p.TreeNode(),
-		Response{personalSig, personalMask.Mask(), NRefusal}}
+		Response{personalSig, personalMask.Mask(), Refusals}}
 	return structResponse, nil
 }
 

@@ -169,7 +169,7 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree,
 func sumRefusals(responseMap map[*SubBlsFtCosi]StructResponse) int {
 	sumRefusal := 0
 	for _, response := range responseMap {
-		sumRefusal += response.NRefusal
+		sumRefusal += len(response.Refusals)
 	}
 	return sumRefusal
 }

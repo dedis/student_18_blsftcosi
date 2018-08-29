@@ -9,6 +9,7 @@ import (
 
 	"github.com/dedis/cothority"
 	"github.com/dedis/kyber"
+	"github.com/dedis/kyber/pairing/bn256"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/stretchr/testify/require"
@@ -25,25 +26,25 @@ func init() {
 	GlobalRegisterDefaultProtocols()
 	onet.GlobalProtocolRegister(FailureProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		vf := func(a, b []byte) bool { return true }
-		return NewBlsFtCosi(n, vf, FailureSubProtocolName, testSuite)
+		return NewBlsFtCosi(n, vf, FailureSubProtocolName, testSuite, pairingSuite)
 	})
 	onet.GlobalProtocolRegister(FailureSubProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		vf := func(a, b []byte) bool { return false }
-		return NewSubBlsFtCosi(n, vf, testSuite)
+		return NewSubBlsFtCosi(n, vf, testSuite, pairingSuite)
 	})
 	onet.GlobalProtocolRegister(RefuseOneProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		vf := func(a, b []byte) bool { return true }
-		return NewBlsFtCosi(n, vf, RefuseOneSubProtocolName, testSuite)
+		return NewBlsFtCosi(n, vf, RefuseOneSubProtocolName, testSuite, pairingSuite)
 	})
 	onet.GlobalProtocolRegister(RefuseOneSubProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		return NewSubBlsFtCosi(n, func(msg, data []byte) bool {
 			return refuse(n, msg, data)
-		}, testSuite)
+		}, testSuite, pairingSuite)
 	})
 }
 
 var testSuite = cothority.Suite
-var cosigningSuite = ThePairingSuite
+var pairingSuite = bn256.NewSuite()
 var defaultTimeout = 5 * time.Second
 
 func TestMain(m *testing.M) {
@@ -91,7 +92,7 @@ func TestProtocol(t *testing.T) {
 			// Unmarshal public keys
 			publics := make([]kyber.Point, len(cosiProtocol.publics))
 			for i, public := range cosiProtocol.publics {
-				publics[i], err = publicByteSliceToPoint(public)
+				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 				if err != nil {
 					local.CloseAll()
 					t.Fatal(err)
@@ -148,7 +149,7 @@ func TestProtocolQuickAnswer(t *testing.T) {
 			// Unmarshal public keys
 			publics := make([]kyber.Point, len(cosiProtocol.publics))
 			for i, public := range cosiProtocol.publics {
-				publics[i], err = publicByteSliceToPoint(public)
+				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 				if err != nil {
 					local.CloseAll()
 					t.Fatal(err)
@@ -162,9 +163,9 @@ func TestProtocolQuickAnswer(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			mask, err := NewMask(cosigningSuite, publics, nil)
+			mask, err := NewMask(cosiProtocol.pairingSuite, publics, nil)
 			require.Nil(t, err)
-			lenRes := cosigningSuite.G1().PointLen()
+			lenRes := cosiProtocol.pairingSuite.G1().PointLen()
 			mask.SetMask(sig[lenRes:])
 			// Test that we have less than nNodes signatures
 			require.NotEqual(t, nNodes, mask.CountEnabled())
@@ -234,7 +235,7 @@ func TestUnresponsiveLeafs(t *testing.T) {
 			// Unmarshal public keys
 			publics := make([]kyber.Point, len(cosiProtocol.publics))
 			for i, public := range cosiProtocol.publics {
-				publics[i], err = publicByteSliceToPoint(public)
+				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 				if err != nil {
 					local.CloseAll()
 					t.Fatal(err)
@@ -309,7 +310,7 @@ func TestUnresponsiveSubleader(t *testing.T) {
 			// Unmarshal public keys
 			publics := make([]kyber.Point, len(cosiProtocol.publics))
 			for i, public := range cosiProtocol.publics {
-				publics[i], err = publicByteSliceToPoint(public)
+				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 				if err != nil {
 					local.CloseAll()
 					t.Fatal(err)
@@ -434,7 +435,7 @@ func TestProtocolRefusalAll(t *testing.T) {
 			// Unmarshal public keys
 			publics := make([]kyber.Point, len(cosiProtocol.publics))
 			for i, public := range cosiProtocol.publics {
-				publics[i], err = publicByteSliceToPoint(public)
+				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 				if err != nil {
 					local.CloseAll()
 					t.Fatal(err)
@@ -499,7 +500,7 @@ func TestProtocolRefuseOne(t *testing.T) {
 				// Unmarshal public keys
 				publics := make([]kyber.Point, len(cosiProtocol.publics))
 				for i, public := range cosiProtocol.publics {
-					publics[i], err = publicByteSliceToPoint(public)
+					publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 					if err != nil {
 						local.CloseAll()
 						t.Fatal(err)
@@ -550,7 +551,7 @@ func getAndVerifySignature(cosiProtocol *BlsFtCosi, publics []kyber.Point,
 func verifySignature(signature []byte, publics []kyber.Point,
 	proposal []byte, policy Policy) error {
 	// verify signature
-	err := Verify(publics, proposal, signature, policy)
+	err := Verify(pairingSuite, publics, proposal, signature, policy)
 	if err != nil {
 		return fmt.Errorf("didn't get a valid signature: %s", err)
 	}

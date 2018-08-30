@@ -15,7 +15,7 @@ import (
 
 // Sign the message with this node and aggregates with all child signatures (in structResponses)
 // Also aggregates the child bitmasks
-func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyber.Point, structResponses []StructResponse,
+func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyber.Point, privates []kyber.Scalar, structResponses []StructResponse,
 	msg []byte, ok bool) (kyber.Point, *Mask, error) {
 
 	if t == nil {
@@ -40,13 +40,14 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 	}
 
 	//generate personal mask
-	self_keypair := globalKeyPairs[t.Index()]
-	personalMask, err := NewMask(ps, publics, self_keypair.Public)
+	public := publics[t.Index()]
+	private := privates[t.Index()]
+	personalMask, err := NewMask(ps, publics, public)
 
 	if !ok {
 		var found bool
 		for i, p := range publics {
-			if p.Equal(self_keypair.Public) {
+			if p.Equal(public) {
 				personalMask.SetBit(i, false)
 				found = true
 			}
@@ -59,7 +60,7 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 	masks = append(masks, personalMask.Mask())
 
 	// generate personal signature and append to other sigs
-	personalSig, err := bls.Sign(ps, self_keypair.Private, msg)
+	personalSig, err := bls.Sign(ps, private, msg)
 
 	if err != nil {
 		return nil, nil, err
@@ -130,6 +131,22 @@ func PublicKeyToByteSlice(ps pairing.Suite, public kyber.Point) ([]byte, error) 
 	}
 
 	return bytePublic, nil
+}
+
+func privateByteSliceToScalar(ps pairing.Suite, private []byte) (kyber.Scalar, error) {
+	scalarPrivate := ps.G2().Scalar()
+	if err := scalarPrivate.UnmarshalBinary(private); err != nil {
+		return nil, err
+	}
+	return scalarPrivate, nil
+}
+
+func PrivateKeyToByteSlice(ps pairing.Suite, private kyber.Scalar) ([]byte, error) {
+	bytePrivate, err := private.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	return bytePrivate, nil
 }
 
 func aggregateResponses(ps pairing.Suite, publics []kyber.Point,

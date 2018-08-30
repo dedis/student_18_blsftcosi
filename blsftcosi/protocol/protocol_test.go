@@ -90,8 +90,8 @@ func TestProtocol(t *testing.T) {
 			}
 
 			// Unmarshal public keys
-			publics := make([]kyber.Point, len(cosiProtocol.publics))
-			for i, public := range cosiProtocol.publics {
+			publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
+			for i, public := range cosiProtocol.PairingPublics {
 				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 				if err != nil {
 					local.CloseAll()
@@ -147,8 +147,8 @@ func TestProtocolQuickAnswer(t *testing.T) {
 			}
 
 			// Unmarshal public keys
-			publics := make([]kyber.Point, len(cosiProtocol.publics))
-			for i, public := range cosiProtocol.publics {
+			publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
+			for i, public := range cosiProtocol.PairingPublics {
 				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 				if err != nil {
 					local.CloseAll()
@@ -233,8 +233,8 @@ func TestUnresponsiveLeafs(t *testing.T) {
 			}
 
 			// Unmarshal public keys
-			publics := make([]kyber.Point, len(cosiProtocol.publics))
-			for i, public := range cosiProtocol.publics {
+			publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
+			for i, public := range cosiProtocol.PairingPublics {
 				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 				if err != nil {
 					local.CloseAll()
@@ -308,8 +308,8 @@ func TestUnresponsiveSubleader(t *testing.T) {
 			}
 
 			// Unmarshal public keys
-			publics := make([]kyber.Point, len(cosiProtocol.publics))
-			for i, public := range cosiProtocol.publics {
+			publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
+			for i, public := range cosiProtocol.PairingPublics {
 				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 				if err != nil {
 					local.CloseAll()
@@ -433,8 +433,8 @@ func TestProtocolRefusalAll(t *testing.T) {
 			}
 
 			// Unmarshal public keys
-			publics := make([]kyber.Point, len(cosiProtocol.publics))
-			for i, public := range cosiProtocol.publics {
+			publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
+			for i, public := range cosiProtocol.PairingPublics {
 				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 				if err != nil {
 					local.CloseAll()
@@ -498,8 +498,8 @@ func TestProtocolRefuseOne(t *testing.T) {
 				}
 
 				// Unmarshal public keys
-				publics := make([]kyber.Point, len(cosiProtocol.publics))
-				for i, public := range cosiProtocol.publics {
+				publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
+				for i, public := range cosiProtocol.PairingPublics {
 					publics[i], err = publicByteSliceToPoint(pairingSuite, public)
 					if err != nil {
 						local.CloseAll()

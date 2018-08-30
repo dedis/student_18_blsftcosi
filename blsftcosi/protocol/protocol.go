@@ -49,7 +49,8 @@ type BlsFtCosi struct {
 	Threshold      int
 	FinalSignature chan []byte // final signature that is sent back to client
 
-	publics         [][]byte // Public keys are marshaled binaries of G2 points
+	PairingPublics  [][]byte // Public keys are marshaled binaries of G2 points
+	PairingPrivates []kyber.Scalar
 	stoppedOnce     sync.Once
 	subProtocols    []*SubBlsFtCosi
 	startChan       chan bool
@@ -98,7 +99,6 @@ func NewBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName s
 		TreeNodeInstance: n,
 		FinalSignature:   make(chan []byte, 1),
 		Data:             make([]byte, 0),
-		publics:          publics,
 		startChan:        make(chan bool, 1),
 		verificationFn:   vf,
 		subProtocolName:  subProtocolName,
@@ -173,8 +173,8 @@ func (p *BlsFtCosi) Dispatch() error {
 	log.Lvl3(p.ServerIdentity().Address, "all protocols started")
 
 	// Unmarshal public keys
-	publics := make([]kyber.Point, len(p.publics))
-	for i, public := range p.publics {
+	publics := make([]kyber.Point, len(p.PairingPublics))
+	for i, public := range p.PairingPublics {
 		publics[i], err = publicByteSliceToPoint(p.pairingSuite, public)
 		if err != nil {
 			return err
@@ -205,7 +205,7 @@ func (p *BlsFtCosi) Dispatch() error {
 	}
 
 	// generate root signature
-	signaturePoint, finalMask, err := generateSignature(p.pairingSuite, p.TreeNodeInstance, publics, responses, p.Msg, verificationOk)
+	signaturePoint, finalMask, err := generateSignature(p.pairingSuite, p.TreeNodeInstance, publics, p.PairingPrivates, responses, p.Msg, verificationOk)
 	if err != nil {
 		p.FinalSignature <- nil
 		return err
@@ -284,7 +284,8 @@ func (p *BlsFtCosi) startSubProtocol(tree *onet.Tree) (*SubBlsFtCosi, error) {
 		return nil, err
 	}
 	cosiSubProtocol := pi.(*SubBlsFtCosi)
-	cosiSubProtocol.Publics = p.publics
+	cosiSubProtocol.PairingPublics = p.PairingPublics
+	cosiSubProtocol.PairingPrivates = p.PairingPrivates
 	cosiSubProtocol.Msg = p.Msg
 	cosiSubProtocol.Data = p.Data
 	cosiSubProtocol.Timeout = p.Timeout / 2

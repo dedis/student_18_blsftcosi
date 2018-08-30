@@ -26,15 +26,16 @@ func init() {
 // SubFtCosi holds the different channels used to receive the different protocol messages.
 type SubBlsFtCosi struct {
 	*onet.TreeNodeInstance
-	Publics        [][]byte
-	Msg            []byte
-	Data           []byte
-	Timeout        time.Duration
-	Threshold      int
-	stoppedOnce    sync.Once
-	verificationFn VerificationFn
-	suite          cosi.Suite
-	pairingSuite   pairing.Suite
+	PairingPublics  [][]byte
+	PairingPrivates []kyber.Scalar
+	Msg             []byte
+	Data            []byte
+	Timeout         time.Duration
+	Threshold       int
+	stoppedOnce     sync.Once
+	verificationFn  VerificationFn
+	suite           cosi.Suite
+	pairingSuite    pairing.Suite
 
 	// protocol/subprotocol channels
 	// these are used to communicate between the subprotocol and the main protocol
@@ -123,7 +124,8 @@ func (p *SubBlsFtCosi) Dispatch() error {
 	}
 
 	// get announcement parameters
-	p.Publics = announcement.Publics
+	p.PairingPublics = announcement.Publics
+	p.PairingPrivates = announcement.Privates
 	p.Timeout = announcement.Timeout
 	if !p.IsRoot() {
 		// We'll be only waiting on the root and the subleaders. The subleaders
@@ -142,8 +144,8 @@ func (p *SubBlsFtCosi) Dispatch() error {
 	}
 
 	// Unmarshal public keys
-	publics := make([]kyber.Point, len(p.Publics))
-	for i, public := range p.Publics {
+	publics := make([]kyber.Point, len(p.PairingPublics))
+	for i, public := range p.PairingPublics {
 		publics[i], err = publicByteSliceToPoint(p.pairingSuite, public)
 		if err != nil {
 			return err
@@ -368,7 +370,7 @@ func (p *SubBlsFtCosi) Start() error {
 	if p.Data == nil {
 		return errors.New("subprotocol does not have data, it can be empty but cannot be nil")
 	}
-	if p.Publics == nil || len(p.Publics) < 1 {
+	if p.PairingPublics == nil || len(p.PairingPublics) < 1 {
 		return errors.New("subprotocol has invalid public keys")
 	}
 	if p.verificationFn == nil {
@@ -386,7 +388,7 @@ func (p *SubBlsFtCosi) Start() error {
 
 	announcement := StructAnnouncement{
 		p.TreeNode(),
-		Announcement{p.Msg, p.Data, p.Publics, p.Timeout, p.Threshold},
+		Announcement{p.Msg, p.Data, p.PairingPublics, p.PairingPrivates, p.Timeout, p.Threshold},
 	}
 	p.ChannelAnnouncement <- announcement
 	return nil
@@ -409,21 +411,22 @@ func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point) (StructR
 
 	Refusals := make(map[int][]byte)
 
-	self_keypair := globalKeyPairs[p.Index()]
+	public := publics[p.Index()]
+	private := p.PairingPrivates[p.Index()]
 	if accepts {
-		personalMask, err = NewMask(p.pairingSuite, publics, self_keypair.Public)
+		personalMask, err = NewMask(p.pairingSuite, publics, public)
 		if err != nil {
 			return StructResponse{}, err
 		}
 
-		personalSig, err = bls.Sign(p.pairingSuite, self_keypair.Private, p.Msg)
+		personalSig, err = bls.Sign(p.pairingSuite, private, p.Msg)
 		if err != nil {
 			return StructResponse{}, err
 		}
 
 	} else { // refuses
 		refusalMsg := []byte(fmt.Sprintf("%s:%d", p.Msg, p.Index()))
-		refusalSig, err := bls.Sign(p.pairingSuite, self_keypair.Private, refusalMsg)
+		refusalSig, err := bls.Sign(p.pairingSuite, p.PairingPrivates[p.Index()], refusalMsg)
 		if err != nil {
 			return StructResponse{}, err
 		}

@@ -1,0 +1,35 @@
+=== RUN   TestGenTreesRoot
+1 : (                    onet.(*Server).Start: 223) - Starting server at 2018-08-29 22:08:27 on address local://127.0.0.1:2000 with public key 825ae4c3b3cbe7c4db0975e999256894fdd9cf5d247290f2f98dcf3bbdf2c414
+2 : (                 onet.(*WebSocket).start: 103) - Starting to listen on 0.0.0.0:2001
+1 : (                 network.(*Router).Start: 103) - New router with address local://127.0.0.1:2000 and public key 825ae4c3b3cbe7c4db0975e999256894fdd9cf5d247290f2f98dcf3bbdf2c414
+1 : (                    onet.(*Server).Start: 223) - Starting server at 2018-08-29 22:08:27 on address local://127.0.0.1:2000 with public key 7f0413e612bc86a215e23151532ff6bf7bf4939f893d9d7652a0b851f851ab98
+2 : (                 onet.(*WebSocket).start: 103) - Starting to listen on 0.0.0.0:2001
+1 : (                 network.(*Router).Start: 103) - New router with address local://127.0.0.1:2000 and public key 7f0413e612bc86a215e23151532ff6bf7bf4939f893d9d7652a0b851f851ab98
+1 : (                    onet.(*Server).Start: 223) - Starting server at 2018-08-29 22:08:27 on address local://127.0.0.1:2000 with public key dc63e21b212f50afcddf85899305caab161a40a103fc85a6180914f5ebe563e0
+2 : (                 onet.(*WebSocket).start: 103) - Starting to listen on 0.0.0.0:2001
+1 : (                 network.(*Router).Start: 103) - New router with address local://127.0.0.1:2000 and public key dc63e21b212f50afcddf85899305caab161a40a103fc85a6180914f5ebe563e0
+1 : (                    onet.(*Server).Start: 223) - Starting server at 2018-08-29 22:08:28 on address local://127.0.0.1:2000 with public key 3e0dee386b199902ee5e98c12d4a8f29740776270f3a98ff38a7a1ff2a264dda
+2 : (                 onet.(*WebSocket).start: 103) - Starting to listen on 0.0.0.0:2001
+1 : (                 network.(*Router).Start: 103) - New router with address local://127.0.0.1:2000 and public key 3e0dee386b199902ee5e98c12d4a8f29740776270f3a98ff38a7a1ff2a264dda
+1 : (                    onet.(*Server).Start: 223) - Starting server at 2018-08-29 22:08:28 on address local://127.0.0.1:2010 with public key 80501f0e4a7f559461787745f91727c5b110d0d30f5f334aad423ed0eca902ec
+2 : (                 onet.(*WebSocket).start: 103) - Starting to listen on 0.0.0.0:2011
+1 : (                 network.(*Router).Start: 103) - New router with address local://127.0.0.1:2010 and public key 80501f0e4a7f559461787745f91727c5b110d0d30f5f334aad423ed0eca902ec
+1 : (                    onet.(*Server).Start: 223) - Starting server at 2018-08-29 22:08:28 on address local://127.0.0.1:2000 with public key 1715358bb8ceb3db636806c474cadbcaaee0d4767ce02c677694c5a46d23e580
+2 : (                 onet.(*WebSocket).start: 103) - Starting to listen on 0.0.0.0:2001
+1 : (                 network.(*Router).Start: 103) - New router with address local://127.0.0.1:2000 and public key 1715358bb8ceb3db636806c474cadbcaaee0d4767ce02c677694c5a46d23e580
+1 : (                    onet.(*Server).Start: 223) - Starting server at 2018-08-29 22:08:28 on address local://127.0.0.1:2010 with public key f7c870085ed9100db1f037ace88086ede923ad2aa683942b78fe9de7724358f6
+2 : (                 onet.(*WebSocket).start: 103) - Starting to listen on 0.0.0.0:2011
+1 : (                 network.(*Router).Start: 103) - New router with address local://127.0.0.1:2010 and public key f7c870085ed9100db1f037ace88086ede923ad2aa683942b78fe9de7724358f6
+1 : (                    onet.(*Server).Start: 223) - Starting server at 2018-08-29 22:08:28 on address local://127.0.0.1:2000 with public key f88d801ef14c5fb6c9443158032b38082f72c16429c5394952b4a3a80e2a8c88
+2 : (                 onet.(*WebSocket).start: 103) - Starting to listen on 0.0.0.0:2001
+1 : (                 network.(*Router).Start: 103) - New router with address local://127.0.0.1:2000 and public key f88d801ef14c5fb6c9443158032b38082f72c16429c5394952b4a3a80e2a8c88
+1 : (                    onet.(*Server).Start: 223) - Starting server at 2018-08-29 22:08:28 on address local://127.0.0.1:2010 with public key 5cda001d19dace1464d5499a7ad353a5ae34674adb1bc44b8ace183fd1f14981
+2 : (                 onet.(*WebSocket).start: 103) - Starting to listen on 0.0.0.0:2011
+1 : (                 network.(*Router).Start: 103) - New router with address local://127.0.0.1:2010 and public key 5cda001d19dace1464d5499a7ad353a5ae34674adb1bc44b8ace183fd1f14981
+1 : (                    onet.(*Server).Start: 223) - Starting server at 2018-08-29 22:08:28 on address local://127.0.0.1:2000 with public key df8a4934c5f3fb25ae8265d73f02c11c30e38542fefe96ccca3049600e847fab
+2 : (                 onet.(*WebSocket).start: 103) - Starting to listen on 0.0.0.0:2001
+1 : (                 network.(*Router).Start: 103) - New router with address local://127.0.0.1:2000 and public key df8a4934c5f3fb25ae8265d73f02c11c30e38542fefe96ccca3049600e847fab
+1 : (                    onet.(*Server).Start: 223) - Starting server at 2018-08-29 22:08:29 on address local://127.0.0.1:2010 with public key 7050a9fb1caddb73f5227c39222db50659d8fab08e8d26f60f2492cffdbdc8ed
+2 : (                 onet.(*WebSocket).start: 103) - Starting to listen on 0.0.0.0:2011
+1 : (                 network.(*Router).Start: 103) - New router with address local://127.0.0.1:2010 and public key 7050a9fb1caddb73f5227c39222db50659d8fab08e8d26f60f2492cffdbdc8ed
+FAIL	github.com/dedis/student_18_blsftcosi/blsftcosi/protocol	1.551s

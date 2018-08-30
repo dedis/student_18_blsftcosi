@@ -7,12 +7,14 @@ import (
 	"math"
 	"time"
 
+	"github.com/dedis/cothority"
 	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/kyber/pairing/bn256"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
 	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"
+	blskgprotocol "github.com/dedis/student_18_blsftcosi/blsftcosi/protocol/blskg"
 )
 
 // This file contains all the code to run a CoSi service. It is used to reply to
@@ -20,8 +22,13 @@ import (
 // As a prototype, it just signs and returns. It would be very easy to write an
 // updated version that chains all signatures for example.
 
+const propagationTimeout = 10 * time.Second
+
 // ServiceName is the name to refer to the CoSi service
 const ServiceName = "blsftCoSiService"
+
+var testSuite = cothority.Suite
+var pairingSuite = bn256.NewSuite()
 
 func init() {
 	onet.RegisterNewService(ServiceName, newCoSiService)
@@ -64,7 +71,37 @@ func (s *Service) SignatureRequest(req *SignatureRequest) (network.Message, erro
 		return nil, errors.New("Couldn't make new protocol: " + err.Error())
 	}
 
+	// Go BlsKG on the nodes
+	pi, err = s.CreateProtocol(blskgprotocol.Name, tree)
+	setupBlsKG := pi.(*blskgprotocol.Setup)
+	if err := pi.Start(); err != nil {
+		return nil, err
+	}
+	log.Lvl3("Started BlsKG-protocol - waiting for done", len(req.Roster.List))
+	publics := make([][]byte, nNodes)
+	privates := make([][]byte, nNodes)
+	select {
+	case <-setupBlsKG.Finished:
+		for i, public := range setupBlsKG.Publics {
+			publics[i], err = protocol.PublicKeyToByteSlice(pairingSuite, public)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		for i, private := range setupBlsKG.Privates {
+			privates[i], err = protocol.PrivateKeyToByteSlice(pairingSuite, private)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+	case <-time.After(propagationTimeout):
+		return nil, errors.New("BlsKG didn't finish in time")
+	}
+
 	// configure the protocol
+	pi, err = s.CreateProtocol(protocol.DefaultProtocolName, tree)
 	p := pi.(*protocol.BlsFtCosi)
 	p.CreateProtocol = s.CreateProtocol
 	p.Msg = req.Message
@@ -74,9 +111,11 @@ func (s *Service) SignatureRequest(req *SignatureRequest) (network.Message, erro
 	if p.NSubtrees < 1 {
 		p.NSubtrees = 1
 	}
-	// TODO
+
 	// Complete Threshold
-	//p.Threshold = p.Tree().Size()
+	p.Threshold = p.Tree().Size()
+	p.PairingPublics = publics
+	p.PairingPrivates = privates
 
 	// start the protocol
 	log.Lvl3("Cosi Service starting up root protocol")

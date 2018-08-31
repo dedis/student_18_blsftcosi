@@ -285,6 +285,9 @@ func (p *BlsFtCosi) startSubProtocol(tree *onet.Tree) (*SubBlsFtCosi, error) {
 	}
 
 	cosiSubProtocol.Threshold = subThreshold
+	cosiSubProtocol.PairingPrivate = p.PairingPrivate
+	cosiSubProtocol.PairingPublic = p.PairingPublic
+	cosiSubProtocol.PairingPublics = p.PairingPublics
 
 	log.Lvl2("Starting sub protocol on", tree)
 	err = cosiSubProtocol.Start()

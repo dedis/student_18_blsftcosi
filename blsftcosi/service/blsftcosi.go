@@ -8,13 +8,17 @@ import (
 	"time"
 
 	"github.com/dedis/cothority"
+	"github.com/dedis/kyber"
 	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/kyber/pairing/bn256"
+	"github.com/dedis/kyber/sign/bls"
+	"github.com/dedis/kyber/sign/cosi"
+	"github.com/dedis/kyber/util/random"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
 	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"
-	blskgprotocol "github.com/dedis/student_18_blsftcosi/blsftcosi/protocol/blskg"
+	blskdprotocol "github.com/dedis/student_18_blsftcosi/blsftcosi/protocol/blskd"
 )
 
 // This file contains all the code to run a CoSi service. It is used to reply to
@@ -39,7 +43,11 @@ func init() {
 // Service is the service that handles collective signing operations
 type Service struct {
 	*onet.ServiceProcessor
-	suite pairing.Suite
+	suite             cosi.Suite
+	pairingSuite      pairing.Suite
+	private           kyber.Scalar
+	public            kyber.Point
+	pairingPublicKeys []kyber.Point
 }
 
 // SignatureRequest is what the Cosi service is expected to receive from clients.
@@ -66,42 +74,27 @@ func (s *Service) SignatureRequest(req *SignatureRequest) (network.Message, erro
 	if tree == nil {
 		return nil, errors.New("failed to generate tree")
 	}
-	pi, err := s.CreateProtocol(protocol.DefaultProtocolName, tree)
-	if err != nil {
-		return nil, errors.New("Couldn't make new protocol: " + err.Error())
-	}
 
-	// Go BlsKG on the nodes
-	pi, err = s.CreateProtocol(blskgprotocol.Name, tree)
-	setupBlsKG := pi.(*blskgprotocol.Setup)
+	// Go BlsKD on the nodes
+	pi, err := s.CreateProtocol(blskdprotocol.Name, tree)
+	blskeydist := pi.(*blskdprotocol.BlsKeyDist)
 	if err := pi.Start(); err != nil {
 		return nil, err
 	}
 	log.Lvl3("Started BlsKG-protocol - waiting for done", len(req.Roster.List))
-	publics := make([][]byte, nNodes)
-	privates := make([][]byte, nNodes)
+
 	select {
-	case <-setupBlsKG.Finished:
-		for i, public := range setupBlsKG.Publics {
-			publics[i], err = protocol.PublicKeyToByteSlice(pairingSuite, public)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		for i, private := range setupBlsKG.Privates {
-			privates[i], err = protocol.PrivateKeyToByteSlice(pairingSuite, private)
-			if err != nil {
-				return nil, err
-			}
-		}
-
+	case pairingPublicKeys := <-blskeydist.PairingPublics:
+		s.pairingPublicKeys = pairingPublicKeys
 	case <-time.After(propagationTimeout):
-		return nil, errors.New("BlsKG didn't finish in time")
+		return nil, errors.New("BlsKD didn't finish in time")
 	}
 
-	// configure the protocol
+	// configure the BlsFtCosi protocol
 	pi, err = s.CreateProtocol(protocol.DefaultProtocolName, tree)
+	if err != nil {
+		return nil, errors.New("Couldn't make new protocol: " + err.Error())
+	}
 	p := pi.(*protocol.BlsFtCosi)
 	p.CreateProtocol = s.CreateProtocol
 	p.Msg = req.Message
@@ -114,8 +107,6 @@ func (s *Service) SignatureRequest(req *SignatureRequest) (network.Message, erro
 
 	// Complete Threshold
 	p.Threshold = p.Tree().Size()
-	p.PairingPublics = publics
-	p.PairingPrivates = privates
 
 	// start the protocol
 	log.Lvl3("Cosi Service starting up root protocol")
@@ -146,12 +137,36 @@ func (s *Service) SignatureRequest(req *SignatureRequest) (network.Message, erro
 // the one starting the protocol) so it's the Service that will be called to
 // generate the PI on all others node.
 func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfig) (onet.ProtocolInstance, error) {
-	log.Lvl3("Cosi Service received New Protocol event")
-	if tn.ProtocolName() == protocol.DefaultProtocolName {
-		return protocol.NewDefaultProtocol(tn)
-	}
-	if tn.ProtocolName() == protocol.DefaultSubProtocolName {
-		return protocol.NewDefaultSubProtocol(tn)
+	log.Lvl3("Cosi Service received on", s.ServerIdentity(), "received new protocol event-", tn.ProtocolName())
+	switch tn.ProtocolName() {
+	case protocol.DefaultProtocolName:
+		pi, err := protocol.NewDefaultProtocol(tn)
+		if err != nil {
+			return nil, err
+		}
+		blsftcosi := pi.(*protocol.BlsFtCosi)
+		blsftcosi.PairingPrivate = s.private
+		blsftcosi.PairingPublic = s.public
+		blsftcosi.PairingPublics = s.pairingPublicKeys
+		return blsftcosi, nil
+	case protocol.DefaultSubProtocolName:
+		pi, err := protocol.NewDefaultSubProtocol(tn)
+		if err != nil {
+			return nil, err
+		}
+		subblsftcosi := pi.(*protocol.SubBlsFtCosi)
+		subblsftcosi.PairingPrivate = s.private
+		subblsftcosi.PairingPublic = s.public
+		subblsftcosi.PairingPublics = s.pairingPublicKeys
+		return subblsftcosi, nil
+	case blskdprotocol.Name:
+		pi, err := blskdprotocol.NewBlsKeyDist(tn)
+		if err != nil {
+			return nil, err
+		}
+		blskeydist := pi.(*blskdprotocol.BlsKeyDist)
+		blskeydist.PairingPublic = s.public
+		return blskeydist, nil
 	}
 	return nil, errors.New("no such protocol " + tn.ProtocolName())
 }
@@ -159,19 +174,29 @@ func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfi
 func newCoSiService(c *onet.Context) (onet.Service, error) {
 	s := &Service{
 		ServiceProcessor: onet.NewServiceProcessor(c),
-		suite:            bn256.NewSuite(),
+		suite:            cothority.Suite,
+		pairingSuite:     bn256.NewSuite(),
 	}
+
+	// Generate bn256 keys for the service.
+	private, public := bls.NewKeyPair(s.pairingSuite, random.New())
+	s.private = private
+	s.public = public
+
 	if err := s.RegisterHandler(s.SignatureRequest); err != nil {
 		log.Error("couldn't register message:", err)
 		return nil, err
 	}
-	if _, err := c.ProtocolRegister(protocol.DefaultProtocolName, protocol.NewDefaultProtocol); err != nil {
-		log.Error("couldn't register main protocol:", err)
-		return nil, err
-	}
-	if _, err := c.ProtocolRegister(protocol.DefaultSubProtocolName, protocol.NewDefaultSubProtocol); err != nil {
-		log.Error("couldn't register sub protocol:", err)
-		return nil, err
-	}
+
+	/*
+		if _, err := c.ProtocolRegister(protocol.DefaultProtocolName, protocol.NewDefaultProtocol); err != nil {
+			log.Error("couldn't register main protocol:", err)
+			return nil, err
+		}
+		if _, err := c.ProtocolRegister(protocol.DefaultSubProtocolName, protocol.NewDefaultSubProtocol); err != nil {
+			log.Error("couldn't register sub protocol:", err)
+			return nil, err
+		}
+	*/
 	return s, nil
 }

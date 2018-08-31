@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"sync"
@@ -10,6 +11,8 @@ import (
 	"github.com/dedis/cothority"
 	"github.com/dedis/kyber"
 	"github.com/dedis/kyber/pairing/bn256"
+	"github.com/dedis/kyber/sign/bls"
+	"github.com/dedis/kyber/util/random"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/stretchr/testify/require"
@@ -21,26 +24,37 @@ const FailureSubProtocolName = "FailureSubProtocol"
 const RefuseOneProtocolName = "RefuseOneProtocol"
 const RefuseOneSubProtocolName = "RefuseOneSubProtocol"
 
+// Used for tests
+var testServiceID onet.ServiceID
+
+const testServiceName = "ServiceBlsFtCosi"
+
 func init() {
 	log.SetDebugVisible(3)
-	GlobalRegisterDefaultProtocols()
-	onet.GlobalProtocolRegister(FailureProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
-		vf := func(a, b []byte) bool { return true }
-		return NewBlsFtCosi(n, vf, FailureSubProtocolName, testSuite, pairingSuite)
-	})
-	onet.GlobalProtocolRegister(FailureSubProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
-		vf := func(a, b []byte) bool { return false }
-		return NewSubBlsFtCosi(n, vf, testSuite, pairingSuite)
-	})
-	onet.GlobalProtocolRegister(RefuseOneProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
-		vf := func(a, b []byte) bool { return true }
-		return NewBlsFtCosi(n, vf, RefuseOneSubProtocolName, testSuite, pairingSuite)
-	})
-	onet.GlobalProtocolRegister(RefuseOneSubProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
-		return NewSubBlsFtCosi(n, func(msg, data []byte) bool {
-			return refuse(n, msg, data)
-		}, testSuite, pairingSuite)
-	})
+	var err error
+	testServiceID, err = onet.RegisterNewService(testServiceName, newService)
+	log.ErrFatal(err)
+
+	// Register Protocols
+	/*
+		GlobalRegisterDefaultProtocols()
+		onet.GlobalProtocolRegister(FailureProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
+			vf := func(a, b []byte) bool { return true }
+			return NewBlsFtCosi(n, vf, FailureSubProtocolName, testSuite, pairingSuite)
+		})
+		onet.GlobalProtocolRegister(FailureSubProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
+			vf := func(a, b []byte) bool { return false }
+			return NewSubBlsFtCosi(n, vf, testSuite, pairingSuite)
+		})
+		onet.GlobalProtocolRegister(RefuseOneProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
+			vf := func(a, b []byte) bool { return true }
+			return NewBlsFtCosi(n, vf, RefuseOneSubProtocolName, testSuite, pairingSuite)
+		})
+		onet.GlobalProtocolRegister(RefuseOneSubProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
+			vf := func(a, b []byte) bool { return refuse(n, a, b) }
+			return NewSubBlsFtCosi(n, vf, testSuite, pairingSuite)
+		})
+	*/
 }
 
 var testSuite = cothority.Suite
@@ -56,7 +70,7 @@ func TestMain(m *testing.M) {
 }
 
 // Tests various trees configurations
-func TestProtocol(t *testing.T) {
+func TestProtocolTest(t *testing.T) {
 	nodes := []int{1, 2, 5, 13, 24}
 	subtrees := []int{1, 2, 5, 9}
 	proposal := []byte{0xFF}
@@ -69,13 +83,31 @@ func TestProtocol(t *testing.T) {
 			log.Lvl2("test asking for", nNodes, "nodes and", nSubtrees, "subtrees")
 
 			local := onet.NewLocalTest(testSuite)
-			_, _, tree := local.GenTree(nNodes, false)
+			// defer local.CloseAl()
+			servers, _, tree := local.GenTree(nNodes, false)
+
+			privateKeys := make([]kyber.Scalar, nNodes)
+			publicKeys := make([]kyber.Point, nNodes)
+			for i, _ := range servers {
+				privateKeys[i], publicKeys[i] = bls.NewKeyPair(pairingSuite, random.New())
+			}
+
+			// Store private, public keys in the services
+			services := local.GetServices(servers, testServiceID)
+			for i, service := range services {
+				tService := service.(*testService)
+				tService.private = privateKeys[i]
+				tService.public = publicKeys[i]
+				tService.pairingPublicKeys = publicKeys
+			}
 
 			pi, err := local.CreateProtocol(DefaultProtocolName, tree)
+			//pi, err := services[0].(*testService).CreateProtocol(DefaultProtocolName, tree)
 			if err != nil {
 				local.CloseAll()
 				t.Fatal("Error in creation of protocol:", err)
 			}
+
 			cosiProtocol := pi.(*BlsFtCosi)
 			cosiProtocol.CreateProtocol = local.CreateProtocol
 			cosiProtocol.Msg = proposal
@@ -83,24 +115,34 @@ func TestProtocol(t *testing.T) {
 			cosiProtocol.Timeout = defaultTimeout
 			cosiProtocol.Threshold = nNodes
 
+			/*
+				cosiProtocol.PairingPrivates = make([][]byte, nNodes)
+				cosiProtocol.PairingPublics = make([][]byte, nNodes)
+				publics := make([]kyber.Point, nNodes)
+				for i, _ := range publics {
+					private, public := bls.NewKeyPair(pairingSuite, random.New())
+					publics[i] = public
+					cosiProtocol.PairingPublics[i], err = PublicKeyToByteSlice(pairingSuite, public)
+					if err != nil {
+						local.CloseAll()
+						t.Fatal(err)
+					}
+
+					cosiProtocol.PairingPrivates[i], err = PrivateKeyToByteSlice(pairingSuite, private)
+					if err != nil {
+						local.CloseAll()
+						t.Fatal(err)
+					}
+				}
+			*/
 			err = cosiProtocol.Start()
 			if err != nil {
 				local.CloseAll()
 				t.Fatal(err)
 			}
 
-			// Unmarshal public keys
-			publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
-			for i, public := range cosiProtocol.PairingPublics {
-				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
-				if err != nil {
-					local.CloseAll()
-					t.Fatal(err)
-				}
-			}
-
 			// get and verify signature
-			_, err = getAndVerifySignature(cosiProtocol, publics, proposal, CompletePolicy{})
+			_, err = getAndVerifySignature(cosiProtocol, proposal, CompletePolicy{})
 			if err != nil {
 				local.CloseAll()
 				t.Fatal(err)
@@ -126,13 +168,30 @@ func TestProtocolQuickAnswer(t *testing.T) {
 			log.Lvl2("test asking for", nNodes, "node(s),", nSubtrees, "subtree(s) and a", threshold, "node(s) threshold")
 
 			local := onet.NewLocalTest(testSuite)
-			_, _, tree := local.GenTree(nNodes, false)
+			// defer local.CloseAl()
+			servers, _, tree := local.GenTree(nNodes, false)
 
-			pi, err := local.CreateProtocol(DefaultProtocolName, tree)
+			privateKeys := make([]kyber.Scalar, nNodes)
+			publicKeys := make([]kyber.Point, nNodes)
+			for i, _ := range servers {
+				privateKeys[i], publicKeys[i] = bls.NewKeyPair(pairingSuite, random.New())
+			}
+
+			// Store private, public keys in the services
+			services := local.GetServices(servers, testServiceID)
+			for i, service := range services {
+				tService := service.(*testService)
+				tService.private = privateKeys[i]
+				tService.public = publicKeys[i]
+				tService.pairingPublicKeys = publicKeys
+			}
+
+			pi, err := services[0].(*testService).CreateProtocol(DefaultProtocolName, tree)
 			if err != nil {
 				local.CloseAll()
 				t.Fatal("Error in creation of protocol:", err)
 			}
+
 			cosiProtocol := pi.(*BlsFtCosi)
 			cosiProtocol.CreateProtocol = local.CreateProtocol
 			cosiProtocol.Msg = proposal
@@ -140,30 +199,40 @@ func TestProtocolQuickAnswer(t *testing.T) {
 			cosiProtocol.Timeout = defaultTimeout
 			cosiProtocol.Threshold = threshold
 
+			/*
+				cosiProtocol.PairingPrivates = make([][]byte, nNodes)
+				cosiProtocol.PairingPublics = make([][]byte, nNodes)
+				publics := make([]kyber.Point, nNodes)
+				for i, _ := range publics {
+					private, public := bls.NewKeyPair(pairingSuite, random.New())
+					publics[i] = public
+					cosiProtocol.PairingPublics[i], err = PublicKeyToByteSlice(pairingSuite, public)
+					if err != nil {
+						local.CloseAll()
+						t.Fatal(err)
+					}
+
+					cosiProtocol.PairingPrivates[i], err = PrivateKeyToByteSlice(pairingSuite, private)
+					if err != nil {
+						local.CloseAll()
+						t.Fatal(err)
+					}
+				}*/
+
 			err = cosiProtocol.Start()
 			if err != nil {
 				local.CloseAll()
 				t.Fatal(err)
 			}
 
-			// Unmarshal public keys
-			publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
-			for i, public := range cosiProtocol.PairingPublics {
-				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
-				if err != nil {
-					local.CloseAll()
-					t.Fatal(err)
-				}
-			}
-
 			// get and verify signature
-			sig, err := getAndVerifySignature(cosiProtocol, publics, proposal, NewThresholdPolicy(threshold))
+			sig, err := getAndVerifySignature(cosiProtocol, proposal, NewThresholdPolicy(threshold))
 			if err != nil {
 				local.CloseAll()
 				t.Fatal(err)
 			}
 
-			mask, err := NewMask(cosiProtocol.pairingSuite, publics, nil)
+			mask, err := NewMask(cosiProtocol.pairingSuite, cosiProtocol.PairingPublics, nil)
 			require.Nil(t, err)
 			lenRes := cosiProtocol.pairingSuite.G1().PointLen()
 			mask.SetMask(sig[lenRes:])
@@ -186,7 +255,9 @@ func TestUnresponsiveLeafs(t *testing.T) {
 			log.Lvl2("test asking for", nNodes, "nodes and", nSubtrees, "subtrees")
 
 			local := onet.NewLocalTest(testSuite)
+			// defer local.CloseAl()
 			servers, roster, tree := local.GenTree(nNodes, false)
+
 			require.NotNil(t, roster)
 
 			// find first subtree leaves servers based on GenTree function
@@ -212,18 +283,53 @@ func TestUnresponsiveLeafs(t *testing.T) {
 				l.Pause()
 			}
 
-			// create protocol
-			pi, err := local.CreateProtocol(DefaultProtocolName, tree)
+			privateKeys := make([]kyber.Scalar, nNodes)
+			publicKeys := make([]kyber.Point, nNodes)
+			for i, _ := range servers {
+				privateKeys[i], publicKeys[i] = bls.NewKeyPair(pairingSuite, random.New())
+			}
+
+			// Store private, public keys in the services
+			services := local.GetServices(servers, testServiceID)
+			for i, service := range services {
+				tService := service.(*testService)
+				tService.private = privateKeys[i]
+				tService.public = publicKeys[i]
+				tService.pairingPublicKeys = publicKeys
+			}
+
+			pi, err := services[0].(*testService).CreateProtocol(DefaultProtocolName, tree)
 			if err != nil {
 				local.CloseAll()
 				t.Fatal("Error in creation of protocol:", err)
 			}
+
 			cosiProtocol := pi.(*BlsFtCosi)
 			cosiProtocol.CreateProtocol = local.CreateProtocol
 			cosiProtocol.Msg = proposal
 			cosiProtocol.NSubtrees = nSubtrees
 			cosiProtocol.Timeout = defaultTimeout
 			cosiProtocol.Threshold = threshold
+
+			/*
+				cosiProtocol.PairingPrivates = make([][]byte, nNodes)
+				cosiProtocol.PairingPublics = make([][]byte, nNodes)
+				publics := make([]kyber.Point, nNodes)
+				for i, _ := range publics {
+					private, public := bls.NewKeyPair(pairingSuite, random.New())
+					publics[i] = public
+					cosiProtocol.PairingPublics[i], err = PublicKeyToByteSlice(pairingSuite, public)
+					if err != nil {
+						local.CloseAll()
+						t.Fatal(err)
+					}
+
+					cosiProtocol.PairingPrivates[i], err = PrivateKeyToByteSlice(pairingSuite, private)
+					if err != nil {
+						local.CloseAll()
+						t.Fatal(err)
+					}
+				}*/
 
 			// start protocol
 			err = cosiProtocol.Start()
@@ -232,18 +338,8 @@ func TestUnresponsiveLeafs(t *testing.T) {
 				t.Fatal("error in starting of protocol:", err)
 			}
 
-			// Unmarshal public keys
-			publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
-			for i, public := range cosiProtocol.PairingPublics {
-				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
-				if err != nil {
-					local.CloseAll()
-					t.Fatal(err)
-				}
-			}
-
 			// get and verify signature
-			_, err = getAndVerifySignature(cosiProtocol, publics, proposal, NewThresholdPolicy(threshold))
+			_, err = getAndVerifySignature(cosiProtocol, proposal, NewThresholdPolicy(threshold))
 			if err != nil {
 				local.CloseAll()
 				t.Fatal(err)
@@ -287,18 +383,53 @@ func TestUnresponsiveSubleader(t *testing.T) {
 			// pause the first sub leader to simulate failure
 			firstSubleaderServer.Pause()
 
-			// create protocol
-			pi, err := local.CreateProtocol(DefaultProtocolName, tree)
+			privateKeys := make([]kyber.Scalar, nNodes)
+			publicKeys := make([]kyber.Point, nNodes)
+			for i, _ := range servers {
+				privateKeys[i], publicKeys[i] = bls.NewKeyPair(pairingSuite, random.New())
+			}
+
+			// Store private, public keys in the services
+			services := local.GetServices(servers, testServiceID)
+			for i, service := range services {
+				tService := service.(*testService)
+				tService.private = privateKeys[i]
+				tService.public = publicKeys[i]
+				tService.pairingPublicKeys = publicKeys
+			}
+
+			pi, err := services[0].(*testService).CreateProtocol(DefaultProtocolName, tree)
 			if err != nil {
 				local.CloseAll()
 				t.Fatal("Error in creation of protocol:", err)
 			}
+
 			cosiProtocol := pi.(*BlsFtCosi)
 			cosiProtocol.CreateProtocol = local.CreateProtocol
 			cosiProtocol.Msg = proposal
 			cosiProtocol.NSubtrees = nSubtrees
 			cosiProtocol.Timeout = defaultTimeout
 			cosiProtocol.Threshold = nNodes - 1
+
+			/*
+				cosiProtocol.PairingPrivates = make([][]byte, nNodes)
+				cosiProtocol.PairingPublics = make([][]byte, nNodes)
+				publics := make([]kyber.Point, nNodes)
+				for i, _ := range publics {
+					private, public := bls.NewKeyPair(pairingSuite, random.New())
+					publics[i] = public
+					cosiProtocol.PairingPublics[i], err = PublicKeyToByteSlice(pairingSuite, public)
+					if err != nil {
+						local.CloseAll()
+						t.Fatal(err)
+					}
+
+					cosiProtocol.PairingPrivates[i], err = PrivateKeyToByteSlice(pairingSuite, private)
+					if err != nil {
+						local.CloseAll()
+						t.Fatal(err)
+					}
+				}*/
 
 			// start protocol
 			err = cosiProtocol.Start()
@@ -307,18 +438,8 @@ func TestUnresponsiveSubleader(t *testing.T) {
 				t.Fatal("Error in starting of protocol:", err)
 			}
 
-			// Unmarshal public keys
-			publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
-			for i, public := range cosiProtocol.PairingPublics {
-				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
-				if err != nil {
-					local.CloseAll()
-					t.Fatal(err)
-				}
-			}
-
 			// get and verify signature
-			_, err = getAndVerifySignature(cosiProtocol, publics, proposal, NewThresholdPolicy(nNodes-1))
+			_, err = getAndVerifySignature(cosiProtocol, proposal, NewThresholdPolicy(nNodes-1))
 			if err != nil {
 				local.CloseAll()
 				t.Fatal(err)
@@ -343,14 +464,29 @@ func TestProtocolErrors(t *testing.T) {
 			log.Lvl2("test asking for", nNodes, "nodes and", nSubtrees, "subtrees")
 
 			local := onet.NewLocalTest(testSuite)
-			_, _, tree := local.GenTree(nNodes, false)
+			servers, _, tree := local.GenTree(nNodes, false)
 
-			// missing create protocol function
-			pi, err := local.CreateProtocol(DefaultProtocolName, tree)
+			privateKeys := make([]kyber.Scalar, nNodes)
+			publicKeys := make([]kyber.Point, nNodes)
+			for i, _ := range servers {
+				privateKeys[i], publicKeys[i] = bls.NewKeyPair(pairingSuite, random.New())
+			}
+
+			// Store private, public keys in the services
+			services := local.GetServices(servers, testServiceID)
+			for i, service := range services {
+				tService := service.(*testService)
+				tService.private = privateKeys[i]
+				tService.public = publicKeys[i]
+				tService.pairingPublicKeys = publicKeys
+			}
+
+			pi, err := services[0].(*testService).CreateProtocol(DefaultProtocolName, tree)
 			if err != nil {
 				local.CloseAll()
 				t.Fatal("Error in creation of protocol:", err)
 			}
+
 			cosiProtocol := pi.(*BlsFtCosi)
 			//cosiProtocol.CreateProtocol = local.CreateProtocol
 			cosiProtocol.Msg = proposal
@@ -400,19 +536,55 @@ func TestProtocolRefusalAll(t *testing.T) {
 			log.Lvl2("test asking for", nNodes, "nodes and", nSubtrees, "subtrees")
 
 			local := onet.NewLocalTest(testSuite)
-			_, _, tree := local.GenTree(nNodes, false)
+			servers, _, tree := local.GenTree(nNodes, false)
 
-			pi, err := local.CreateProtocol(FailureProtocolName, tree)
+			privateKeys := make([]kyber.Scalar, nNodes)
+			publicKeys := make([]kyber.Point, nNodes)
+			for i, _ := range servers {
+				privateKeys[i], publicKeys[i] = bls.NewKeyPair(pairingSuite, random.New())
+			}
+
+			// Store private, public keys in the services
+			services := local.GetServices(servers, testServiceID)
+			for i, service := range services {
+				tService := service.(*testService)
+				tService.private = privateKeys[i]
+				tService.public = publicKeys[i]
+				tService.pairingPublicKeys = publicKeys
+			}
+
+			pi, err := services[0].(*testService).CreateProtocol(DefaultProtocolName, tree)
 			if err != nil {
 				local.CloseAll()
 				t.Fatal("Error in creation of protocol:", err)
 			}
+
 			cosiProtocol := pi.(*BlsFtCosi)
 			cosiProtocol.CreateProtocol = local.CreateProtocol
 			cosiProtocol.Msg = proposal
 			cosiProtocol.NSubtrees = nSubtrees
 			cosiProtocol.Timeout = defaultTimeout
 			cosiProtocol.Threshold = nNodes / 2
+
+			/*
+				cosiProtocol.PairingPrivates = make([][]byte, nNodes)
+				cosiProtocol.PairingPublics = make([][]byte, nNodes)
+				publics := make([]kyber.Point, nNodes)
+				for i, _ := range publics {
+					private, public := bls.NewKeyPair(pairingSuite, random.New())
+					publics[i] = public
+					cosiProtocol.PairingPublics[i], err = PublicKeyToByteSlice(pairingSuite, public)
+					if err != nil {
+						local.CloseAll()
+						t.Fatal(err)
+					}
+
+					cosiProtocol.PairingPrivates[i], err = PrivateKeyToByteSlice(pairingSuite, private)
+					if err != nil {
+						local.CloseAll()
+						t.Fatal(err)
+					}
+				}*/
 
 			err = cosiProtocol.Start()
 			if err != nil {
@@ -430,16 +602,6 @@ func TestProtocolRefusalAll(t *testing.T) {
 				// wait a bit longer than the protocol timeout
 				local.CloseAll()
 				t.Fatal("didn't get signature in time")
-			}
-
-			// Unmarshal public keys
-			publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
-			for i, public := range cosiProtocol.PairingPublics {
-				publics[i], err = publicByteSliceToPoint(pairingSuite, public)
-				if err != nil {
-					local.CloseAll()
-					t.Fatal(err)
-				}
 			}
 
 			require.Nil(t, signature)
@@ -465,19 +627,55 @@ func TestProtocolRefuseOne(t *testing.T) {
 				counter = &Counter{refuseIdx: refuseIdx}
 
 				local := onet.NewLocalTest(testSuite)
-				_, _, tree := local.GenTree(nNodes, false)
 
-				pi, err := local.CreateProtocol(RefuseOneProtocolName, tree)
+				servers, _, tree := local.GenTree(nNodes, false)
+				privateKeys := make([]kyber.Scalar, nNodes)
+				publicKeys := make([]kyber.Point, nNodes)
+				for i, _ := range servers {
+					privateKeys[i], publicKeys[i] = bls.NewKeyPair(pairingSuite, random.New())
+				}
+
+				// Store private, public keys in the services
+				services := local.GetServices(servers, testServiceID)
+				for i, service := range services {
+					tService := service.(*testService)
+					tService.private = privateKeys[i]
+					tService.public = publicKeys[i]
+					tService.pairingPublicKeys = publicKeys
+				}
+
+				pi, err := services[0].(*testService).CreateProtocol(DefaultProtocolName, tree)
 				if err != nil {
 					local.CloseAll()
 					t.Fatal("Error in creation of protocol:", err)
 				}
+
 				cosiProtocol := pi.(*BlsFtCosi)
 				cosiProtocol.CreateProtocol = local.CreateProtocol
 				cosiProtocol.Msg = proposal
 				cosiProtocol.NSubtrees = nSubtrees
 				cosiProtocol.Timeout = defaultTimeout
 				cosiProtocol.Threshold = nNodes - 1
+
+				/*
+					cosiProtocol.PairingPrivates = make([][]byte, nNodes)
+					cosiProtocol.PairingPublics = make([][]byte, nNodes)
+					publics := make([]kyber.Point, nNodes)
+					for i, _ := range publics {
+						private, public := bls.NewKeyPair(pairingSuite, random.New())
+						publics[i] = public
+						cosiProtocol.PairingPublics[i], err = PublicKeyToByteSlice(pairingSuite, public)
+						if err != nil {
+							local.CloseAll()
+							t.Fatal(err)
+						}
+
+						cosiProtocol.PairingPrivates[i], err = PrivateKeyToByteSlice(pairingSuite, private)
+						if err != nil {
+							local.CloseAll()
+							t.Fatal(err)
+						}
+					}*/
 
 				err = cosiProtocol.Start()
 				if err != nil {
@@ -497,23 +695,13 @@ func TestProtocolRefuseOne(t *testing.T) {
 					t.Fatal("didn't get signature in time")
 				}
 
-				// Unmarshal public keys
-				publics := make([]kyber.Point, len(cosiProtocol.PairingPublics))
-				for i, public := range cosiProtocol.PairingPublics {
-					publics[i], err = publicByteSliceToPoint(pairingSuite, public)
-					if err != nil {
-						local.CloseAll()
-						t.Fatal(err)
-					}
-				}
-
-				err = verifySignature(signature, publics, proposal, CompletePolicy{})
+				err = verifySignature(signature, cosiProtocol.PairingPublics, proposal, CompletePolicy{})
 				if err == nil {
 					local.CloseAll()
 					t.Fatalf("verification should fail, refused index: %d", refuseIdx)
 				}
 
-				err = verifySignature(signature, publics, proposal, NewThresholdPolicy(nNodes-1))
+				err = verifySignature(signature, cosiProtocol.PairingPublics, proposal, NewThresholdPolicy(nNodes-1))
 				if err != nil {
 					local.CloseAll()
 					t.Fatal(err)
@@ -532,8 +720,42 @@ func TestProtocolRefuseOne(t *testing.T) {
 	}
 }
 
-func getAndVerifySignature(cosiProtocol *BlsFtCosi, publics []kyber.Point,
-	proposal []byte, policy Policy) ([]byte, error) {
+// Create private-public keypair for all protocol instances. Returns the root-node service on which the protocol must be started
+func blsftcosi(local *onet.LocalTest, nNodes int) (*BlsFtCosi, error) {
+	servers, _, tree := local.GenTree(nNodes, false)
+
+	privateKeys := make([]kyber.Scalar, nNodes)
+	publicKeys := make([]kyber.Point, nNodes)
+	for i, _ := range servers {
+		privateKeys[i], publicKeys[i] = bls.NewKeyPair(pairingSuite, random.New())
+	}
+
+	// Store private, public keys in the services
+	services := local.GetServices(servers, testServiceID)
+	for i, service := range services {
+		tService := service.(*testService)
+		tService.private = privateKeys[i]
+		tService.public = publicKeys[i]
+		tService.pairingPublicKeys = publicKeys
+	}
+
+	pi, err := services[0].(*testService).CreateProtocol(DefaultProtocolName, tree)
+	return pi.(*BlsFtCosi), err
+}
+
+// testService allows setting the dkg-field of the protocol.
+type testService struct {
+	// We need to embed the ServiceProcessor, so that incoming messages
+	// are correctly handled.
+	*onet.ServiceProcessor
+
+	// Has to be initialised by the test
+	private           kyber.Scalar
+	public            kyber.Point
+	pairingPublicKeys []kyber.Point
+}
+
+func getAndVerifySignature(cosiProtocol *BlsFtCosi, proposal []byte, policy Policy) ([]byte, error) {
 	var signature []byte
 	log.Lvl3("Waiting for Instance")
 	select {
@@ -545,7 +767,7 @@ func getAndVerifySignature(cosiProtocol *BlsFtCosi, publics []kyber.Point,
 		return nil, fmt.Errorf("didn't get commitment in time")
 	}
 
-	return signature, verifySignature(signature, publics, proposal, policy)
+	return signature, verifySignature(signature, cosiProtocol.PairingPublics, proposal, policy)
 }
 
 func verifySignature(signature []byte, publics []kyber.Point,
@@ -575,4 +797,39 @@ func refuse(n *onet.TreeNodeInstance, msg, data []byte) bool {
 		return false
 	}
 	return true
+}
+
+// starts a new service. No function needed.
+func newService(c *onet.Context) (onet.Service, error) {
+	s := &testService{
+		ServiceProcessor: onet.NewServiceProcessor(c),
+	}
+	return s, nil
+}
+
+// Store the public and private keys in the protocol
+func (s *testService) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfig) (onet.ProtocolInstance, error) {
+	switch tn.ProtocolName() {
+	case DefaultProtocolName:
+		pi, err := NewDefaultProtocol(tn)
+		if err != nil {
+			return nil, err
+		}
+		blsftcosi := pi.(*BlsFtCosi)
+		blsftcosi.PairingPrivate = s.private
+		blsftcosi.PairingPublic = s.public
+		blsftcosi.PairingPublics = s.pairingPublicKeys
+		return blsftcosi, nil
+	case DefaultSubProtocolName:
+		pi, err := NewDefaultSubProtocol(tn)
+		if err != nil {
+			return nil, err
+		}
+		subblsftcosi := pi.(*SubBlsFtCosi)
+		subblsftcosi.PairingPrivate = s.private
+		subblsftcosi.PairingPublic = s.public
+		subblsftcosi.PairingPublics = s.pairingPublicKeys
+		return subblsftcosi, nil
+	}
+	return nil, errors.New("unknown protocol for this service")
 }

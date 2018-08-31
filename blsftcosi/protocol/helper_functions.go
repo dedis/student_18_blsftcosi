@@ -15,7 +15,7 @@ import (
 
 // Sign the message with this node and aggregates with all child signatures (in structResponses)
 // Also aggregates the child bitmasks
-func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyber.Point, privates []kyber.Scalar, structResponses []StructResponse,
+func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyber.Point, private kyber.Scalar, structResponses []StructResponse,
 	msg []byte, ok bool) (kyber.Point, *Mask, error) {
 
 	if t == nil {
@@ -41,7 +41,6 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 
 	//generate personal mask
 	public := publics[t.Index()]
-	private := privates[t.Index()]
 	personalMask, err := NewMask(ps, publics, public)
 
 	if !ok {

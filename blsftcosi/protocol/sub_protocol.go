@@ -26,16 +26,17 @@ func init() {
 // SubFtCosi holds the different channels used to receive the different protocol messages.
 type SubBlsFtCosi struct {
 	*onet.TreeNodeInstance
-	PairingPublics  [][]byte
-	PairingPrivates []kyber.Scalar
-	Msg             []byte
-	Data            []byte
-	Timeout         time.Duration
-	Threshold       int
-	stoppedOnce     sync.Once
-	verificationFn  VerificationFn
-	suite           cosi.Suite
-	pairingSuite    pairing.Suite
+	PairingPublics []kyber.Point
+	PairingPublic  kyber.Point
+	PairingPrivate kyber.Scalar
+	Msg            []byte
+	Data           []byte
+	Timeout        time.Duration
+	Threshold      int
+	stoppedOnce    sync.Once
+	verificationFn VerificationFn
+	suite          cosi.Suite
+	pairingSuite   pairing.Suite
 
 	// protocol/subprotocol channels
 	// these are used to communicate between the subprotocol and the main protocol
@@ -124,8 +125,6 @@ func (p *SubBlsFtCosi) Dispatch() error {
 	}
 
 	// get announcement parameters
-	p.PairingPublics = announcement.Publics
-	p.PairingPrivates = announcement.Privates
 	p.Timeout = announcement.Timeout
 	if !p.IsRoot() {
 		// We'll be only waiting on the root and the subleaders. The subleaders
@@ -144,20 +143,29 @@ func (p *SubBlsFtCosi) Dispatch() error {
 	}
 
 	// Unmarshal public keys
-	publics := make([]kyber.Point, len(p.PairingPublics))
-	for i, public := range p.PairingPublics {
-		publics[i], err = publicByteSliceToPoint(p.pairingSuite, public)
+	/*
+		publics := make([]kyber.Point, len(p.PairingPublics))
+		for i, public := range p.PairingPublics {
+			publics[i], err = publicByteSliceToPoint(p.pairingSuite, public)
+			if err != nil {
+				return err
+			}
+		}*/
+
+	// Unmarshal own private key
+	/*
+		private, err := privateByteSliceToScalar(p.pairingSuite, p.PairingPrivate)
 		if err != nil {
 			return err
-		}
-	}
+		}*/
+
 	// start the verification in background if I'm not the root because
 	// root does the verification in the main protocol
 	if !p.IsRoot() {
 		go func() {
 			log.Lvl3(p.ServerIdentity(), "starting verification in the background")
 			verificationOk := p.verificationFn(p.Msg, p.Data)
-			personalResponse, err := p.getResponse(verificationOk, publics)
+			personalResponse, err := p.getResponse(verificationOk, p.PairingPublics, p.PairingPrivate)
 			if err != nil {
 				log.Error("error while generating own commitment:", err)
 				return
@@ -210,7 +218,7 @@ loop:
 			nodesCanRespond = remove(nodesCanRespond, response.TreeNode)
 
 			// verify mask of the received response
-			verificationMask, err := NewMask(p.pairingSuite, publics, nil)
+			verificationMask, err := NewMask(p.pairingSuite, p.PairingPublics, nil)
 			if err != nil {
 				return err
 			}
@@ -224,7 +232,7 @@ loop:
 				// verify the refusals is signed correctly
 				for index, refusal := range response.Refusals {
 					refusalMsg := []byte(fmt.Sprintf("%s:%d", p.Msg, index))
-					refusalPublic := publics[index]
+					refusalPublic := p.PairingPublics[index]
 					err = bls.Verify(p.pairingSuite, refusalPublic, refusalMsg, refusal)
 					// Do not send invalid refusals
 					if err != nil {
@@ -254,7 +262,7 @@ loop:
 					// verify the refusal is signed correctly
 					for index, refusal := range response.Refusals {
 						refusalMsg := []byte(fmt.Sprintf("%s:%d", p.Msg, index))
-						refusalPublic := publics[index]
+						refusalPublic := p.PairingPublics[index]
 						err = bls.Verify(p.pairingSuite, refusalPublic, refusalMsg, refusal)
 						// ignore the refusal if not properly signed.
 						if err == nil {
@@ -264,7 +272,7 @@ loop:
 
 					if p.IsLeaf() {
 						log.Warn(p.ServerIdentity(), "leaf refused Response, marking as not signed")
-						return p.sendAggregatedResponses(publics, []StructResponse{}, Refusals)
+						return p.sendAggregatedResponses(p.PairingPublics, []StructResponse{}, Refusals)
 					}
 					log.Warn(p.ServerIdentity(), "non-leaf got refusal")
 				} else {
@@ -284,7 +292,7 @@ loop:
 
 				if quickAnswer || finalAnswer {
 
-					err = p.sendAggregatedResponses(publics, responses, Refusals)
+					err = p.sendAggregatedResponses(p.PairingPublics, responses, Refusals)
 					if err != nil {
 						return err
 					}
@@ -313,7 +321,7 @@ loop:
 
 			// sending responses received
 			// TODO - Only send if there are newer responses
-			err = p.sendAggregatedResponses(publics, responses, Refusals)
+			err = p.sendAggregatedResponses(p.PairingPublics, responses, Refusals)
 			if err != nil {
 				return err
 			}
@@ -388,7 +396,7 @@ func (p *SubBlsFtCosi) Start() error {
 
 	announcement := StructAnnouncement{
 		p.TreeNode(),
-		Announcement{p.Msg, p.Data, p.PairingPublics, p.PairingPrivates, p.Timeout, p.Threshold},
+		Announcement{p.Msg, p.Data, p.Timeout, p.Threshold},
 	}
 	p.ChannelAnnouncement <- announcement
 	return nil
@@ -397,7 +405,7 @@ func (p *SubBlsFtCosi) Start() error {
 // generates a response.
 // the boolean indicates whether the response is a proposal acceptance or a proposal refusal.
 // Returns the response and an error if there was a problem in the process.
-func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point) (StructResponse, error) {
+func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point, private kyber.Scalar) (StructResponse, error) {
 
 	personalMask, err := NewMask(p.pairingSuite, publics, nil)
 	if err != nil {
@@ -412,7 +420,6 @@ func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point) (StructR
 	Refusals := make(map[int][]byte)
 
 	public := publics[p.Index()]
-	private := p.PairingPrivates[p.Index()]
 	if accepts {
 		personalMask, err = NewMask(p.pairingSuite, publics, public)
 		if err != nil {
@@ -426,7 +433,7 @@ func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point) (StructR
 
 	} else { // refuses
 		refusalMsg := []byte(fmt.Sprintf("%s:%d", p.Msg, p.Index()))
-		refusalSig, err := bls.Sign(p.pairingSuite, p.PairingPrivates[p.Index()], refusalMsg)
+		refusalSig, err := bls.Sign(p.pairingSuite, private, refusalMsg)
 		if err != nil {
 			return StructResponse{}, err
 		}

@@ -3,13 +3,14 @@ package service
 import (
 	"testing"
 
+	"github.com/dedis/cothority"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"
 	"github.com/stretchr/testify/require"
 )
 
-var tSuite = protocol.ThePairingSuite
+var tSuite = cothority.Suite
 
 func TestMain(m *testing.M) {
 	log.MainTest(m)
@@ -36,7 +37,7 @@ func TestServiceCosi(t *testing.T) {
 		require.Nil(t, err, "Couldn't send")
 
 		// verify the response still
-		require.Nil(t, protocol.Verify(tSuite, roster.Publics(), msg, reply.Signature, protocol.CompletePolicy{}))
+		require.Nil(t, protocol.Verify(pairingSuite, roster.Publics(), msg, reply.Signature, protocol.CompletePolicy{}))
 	}
 }
 
@@ -61,5 +62,5 @@ func TestCreateAggregate(t *testing.T) {
 	require.Nil(t, err, "Couldn't send")
 
 	// verify the response still
-	require.Nil(t, protocol.Verify(tSuite, roster.Publics(), msg, res.Signature, protocol.CompletePolicy{}))
+	require.Nil(t, protocol.Verify(pairingSuite, roster.Publics(), msg, res.Signature, protocol.CompletePolicy{}))
 }

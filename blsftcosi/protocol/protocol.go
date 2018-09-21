@@ -14,7 +14,6 @@ import (
 	"github.com/dedis/kyber/sign/cosi"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
-	"github.com/dedis/onet/network"
 )
 
 // VerificationFn is called on every node. Where msg is the message that is
@@ -24,7 +23,7 @@ type VerificationFn func(msg []byte, data []byte) bool
 // init is done at startup. It defines every messages that is handled by the network
 // and registers the protocols.
 func init() {
-	network.RegisterMessages(Announcement{}, Response{}, Stop{})
+	GlobalRegisterDefaultProtocols()
 }
 
 // BlsFtCosi holds the parameters of the protocol.
@@ -93,9 +92,9 @@ func NewBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName s
 // Shutdown stops the protocol
 func (p *BlsFtCosi) Shutdown() error {
 	p.stoppedOnce.Do(func() {
-		for _, subFtCosi := range p.subProtocols {
+		/*for _, subFtCosi := range p.subProtocols {
 			subFtCosi.HandleStop(StructStop{subFtCosi.TreeNode(), Stop{}})
-		}
+		}*/
 		close(p.startChan)
 		close(p.FinalSignature)
 	})
@@ -109,6 +108,7 @@ func (p *BlsFtCosi) Dispatch() error {
 	if !p.IsRoot() {
 		return nil
 	}
+	log.Lvl3("BlsFtCosi: Public keys are", p.PairingPublics)
 
 	select {
 	case _, ok := <-p.startChan:

@@ -21,13 +21,40 @@ import (
 const FailureProtocolName = "FailureProtocol"
 const FailureSubProtocolName = "FailureSubProtocol"
 
+func NewFailureProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
+	vf := func(a, b []byte) bool { return true }
+	return NewBlsFtCosi(n, vf, FailureSubProtocolName, testSuite, pairingSuite)
+}
+func NewFailureSubProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
+	vf := func(a, b []byte) bool { return false }
+	return NewSubBlsFtCosi(n, vf, testSuite, pairingSuite)
+}
+
 const RefuseOneProtocolName = "RefuseOneProtocol"
 const RefuseOneSubProtocolName = "RefuseOneSubProtocol"
+
+func NewRefuseOneProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
+	vf := func(a, b []byte) bool { return true }
+	return NewBlsFtCosi(n, vf, RefuseOneSubProtocolName, testSuite, pairingSuite)
+}
+func NewRefuseOneSubProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
+	vf := func(a, b []byte) bool { return refuse(n, a, b) }
+	return NewSubBlsFtCosi(n, vf, testSuite, pairingSuite)
+}
 
 // Used for tests
 var testServiceID onet.ServiceID
 
 const testServiceName = "ServiceBlsFtCosi"
+
+var newProtocolMethods = map[string]func(*onet.TreeNodeInstance) (onet.ProtocolInstance, error){
+	DefaultProtocolName:      NewDefaultProtocol,
+	DefaultSubProtocolName:   NewDefaultSubProtocol,
+	FailureProtocolName:      NewFailureProtocol,
+	FailureSubProtocolName:   NewFailureSubProtocol,
+	RefuseOneProtocolName:    NewRefuseOneProtocol,
+	RefuseOneSubProtocolName: NewRefuseOneSubProtocol,
+}
 
 func init() {
 	log.SetDebugVisible(3)
@@ -36,25 +63,11 @@ func init() {
 	log.ErrFatal(err)
 
 	// Register Protocols
-	/*
-		GlobalRegisterDefaultProtocols()
-		onet.GlobalProtocolRegister(FailureProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
-			vf := func(a, b []byte) bool { return true }
-			return NewBlsFtCosi(n, vf, FailureSubProtocolName, testSuite, pairingSuite)
-		})
-		onet.GlobalProtocolRegister(FailureSubProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
-			vf := func(a, b []byte) bool { return false }
-			return NewSubBlsFtCosi(n, vf, testSuite, pairingSuite)
-		})
-		onet.GlobalProtocolRegister(RefuseOneProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
-			vf := func(a, b []byte) bool { return true }
-			return NewBlsFtCosi(n, vf, RefuseOneSubProtocolName, testSuite, pairingSuite)
-		})
-		onet.GlobalProtocolRegister(RefuseOneSubProtocolName, func(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
-			vf := func(a, b []byte) bool { return refuse(n, a, b) }
-			return NewSubBlsFtCosi(n, vf, testSuite, pairingSuite)
-		})
-	*/
+	GlobalRegisterDefaultProtocols()
+	onet.GlobalProtocolRegister(FailureProtocolName, NewFailureProtocol)
+	onet.GlobalProtocolRegister(FailureSubProtocolName, NewFailureSubProtocol)
+	onet.GlobalProtocolRegister(RefuseOneProtocolName, NewRefuseOneProtocol)
+	onet.GlobalProtocolRegister(RefuseOneSubProtocolName, NewRefuseOneSubProtocol)
 }
 
 var testSuite = cothority.Suite
@@ -71,6 +84,7 @@ func TestMain(m *testing.M) {
 
 // Tests various trees configurations
 func TestProtocol(t *testing.T) {
+	log.SetDebugVisible(3)
 	nodes := []int{1, 2, 5, 13, 24}
 	subtrees := []int{1, 2, 5, 9}
 	proposal := []byte{0xFF}
@@ -138,6 +152,7 @@ func TestProtocol(t *testing.T) {
 
 // Tests various trees configurations
 func TestProtocolQuickAnswer(t *testing.T) {
+	log.SetDebugVisible(3)
 	nodes := []int{2, 5, 13, 24}
 	subtrees := []int{1, 2, 5, 9}
 	proposal := []byte{0xFF}
@@ -493,7 +508,8 @@ func TestProtocolRefusalAll(t *testing.T) {
 			}
 
 			rootService := services[0].(*testService)
-			pi, err := rootService.CreateProtocol(DefaultProtocolName, tree)
+			pi, err := rootService.CreateProtocol(FailureProtocolName, tree)
+			// pi, err := rootService.CreateProtocol(DefaultProtocolName, tree)
 			if err != nil {
 				local.CloseAll()
 				t.Fatal("Error in creation of protocol:", err)
@@ -569,7 +585,8 @@ func TestProtocolRefuseOne(t *testing.T) {
 				}
 
 				rootService := services[0].(*testService)
-				pi, err := rootService.CreateProtocol(DefaultProtocolName, tree)
+				pi, err := rootService.CreateProtocol(RefuseOneProtocolName, tree)
+				//pi, err := rootService.CreateProtocol(DefaultProtocolName, tree)
 				if err != nil {
 					local.CloseAll()
 					t.Fatal("Error in creation of protocol:", err)
@@ -720,22 +737,23 @@ func newService(c *onet.Context) (onet.Service, error) {
 // Store the public and private keys in the protocol
 func (s *testService) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfig) (onet.ProtocolInstance, error) {
 	log.Lvl3("Cosi Service received New Protocol event")
+	newProtocolMethod, ok := newProtocolMethods[tn.ProtocolName()]
+	if !ok {
+		return nil, errors.New("unknown protocol for this service")
+	}
+
+	pi, err := newProtocolMethod(tn)
+	if err != nil {
+		return nil, err
+	}
 	switch tn.ProtocolName() {
-	case DefaultProtocolName:
-		pi, err := NewDefaultProtocol(tn)
-		if err != nil {
-			return nil, err
-		}
+	case DefaultProtocolName, FailureProtocolName, RefuseOneProtocolName:
 		blsftcosi := pi.(*BlsFtCosi)
 		blsftcosi.PairingPrivate = s.private
 		blsftcosi.PairingPublic = s.public
 		blsftcosi.PairingPublics = s.pairingPublicKeys
 		return blsftcosi, nil
-	case DefaultSubProtocolName:
-		pi, err := NewDefaultSubProtocol(tn)
-		if err != nil {
-			return nil, err
-		}
+	case DefaultSubProtocolName, FailureSubProtocolName, RefuseOneSubProtocolName:
 		subblsftcosi := pi.(*SubBlsFtCosi)
 		subblsftcosi.PairingPrivate = s.private
 		subblsftcosi.PairingPublic = s.public

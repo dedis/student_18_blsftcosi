@@ -150,7 +150,7 @@ func signStatement(read io.Reader, el *onet.Roster) (*s.SignatureResponse,
 			return nil, errors.New("received an invalid repsonse")
 		}
 
-		err = protocol.Verify(protocol.ThePairingSuite, publics, msg, response.Signature, protocol.CompletePolicy{})
+		err = protocol.Verify(publics, msg, response.Signature, protocol.CompletePolicy{})
 		if err != nil {
 			return nil, err
 		}
@@ -220,7 +220,7 @@ func verifySignatureHash(b []byte, sig *s.SignatureResponse, el *onet.Roster) er
 			"doesn't match with the hash of the file.)")
 	}
 	// TODO - We should use suite from cothority
-	if err := protocol.Verify(protocol.ThePairingSuite, publics, fHash, sig.Signature, protocol.CompletePolicy{}); err != nil {
+	if err := protocol.Verify(publics, fHash, sig.Signature, protocol.CompletePolicy{}); err != nil {
 		return errors.New("Invalid sig:" + err.Error())
 	}
 	return nil

@@ -170,7 +170,7 @@ func signStatement(client *service.Client, read io.Reader, el *onet.Roster) (*se
 		if !ok || err != nil {
 			return nil, errors.New("received an invalid response")
 		}
-		err = protocol.Verify(suite, el.Publics(), msg, response.Signature, protocol.CompletePolicy{})
+		err = protocol.Verify(el.Publics(), msg, response.Signature, protocol.CompletePolicy{})
 		if err != nil {
 			return nil, err
 		}
@@ -198,7 +198,7 @@ func verifySignatureHash(suite pairing.Suite, b []byte, sig *service.SignatureRe
 			"belonging to another file. (The hash provided by the signature " +
 			"doesn't match with the hash of the file.)")
 	}
-	err := protocol.Verify(suite, el.Publics(), fHash, sig.Signature, protocol.CompletePolicy{})
+	err := protocol.Verify(el.Publics(), fHash, sig.Signature, protocol.CompletePolicy{})
 	if err != nil {
 		return errors.New("Invalid sig:" + err.Error())
 	}

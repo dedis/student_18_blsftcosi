@@ -58,7 +58,6 @@ func NewDefaultSubProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, err
 // NewSubFtCosi is used to define the subprotocol and to register
 // the channels where the messages will be received.
 func NewSubBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, suite cosi.Suite, pairingSuite pairing.Suite) (onet.ProtocolInstance, error) {
-
 	// tests if it's a three level tree
 	moreThreeLevel := false
 	n.Tree().Root.Visit(0, func(depth int, n *onet.TreeNode) {
@@ -104,6 +103,7 @@ func (p *SubBlsFtCosi) Dispatch() error {
 		}
 		p.Done()
 	}()
+	log.Lvl3("SubBlsFtCosi: Public keys are", p.PairingPublics)
 	var err error
 	var channelOpen bool
 
@@ -292,6 +292,7 @@ loop:
 
 				if quickAnswer || finalAnswer {
 
+					log.Lvl2(p.ServerIdentity(), "Quick answer:", quickAnswer, "Final answer", finalAnswer)
 					err = p.sendAggregatedResponses(p.PairingPublics, responses, Refusals)
 					if err != nil {
 						return err

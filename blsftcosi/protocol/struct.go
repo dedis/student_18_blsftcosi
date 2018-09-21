@@ -8,6 +8,7 @@ import (
 
 	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/onet"
+	"github.com/dedis/onet/network"
 )
 
 // DefaultProtocolName can be used from other packages to refer to this protocol.
@@ -24,6 +25,9 @@ type blsftCosiSuite struct {
 	r cipher.Stream
 }
 
+func init() {
+	network.RegisterMessages(&Announcement{}, &Response{}, &Stop{})
+}
 func (m *blsftCosiSuite) Hash() hash.Hash {
 	return sha512.New() // TODO change hash?
 }

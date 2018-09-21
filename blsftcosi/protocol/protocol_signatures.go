@@ -83,7 +83,7 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree,
 	}
 
 	// handle answers from all parallel threads
-	sharedMask, err := NewMask(ThePairingSuite, publics, nil)
+	sharedMask, err := NewMask(p.pairingSuite, publics, nil)
 	if err != nil {
 		close(closingChan)
 		return nil, nil, err
@@ -102,7 +102,7 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree,
 				responseMap[res.subProtocol] = res.structResponse
 
 				// check if threshold is reachable
-				if sumRefusals(responseMap) > len(p.publics)-p.Threshold {
+				if sumRefusals(responseMap) > len(p.PairingPublics)-p.Threshold {
 					// we assume the root accepts the proposal
 					thresholdReachable = false
 				}
@@ -155,8 +155,8 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree,
 	runningSubProtocols := make([]*SubBlsFtCosi, 0, len(responsesChan))
 	responses := make([]StructResponse, 0, len(responsesChan))
 	for subProtocol, response := range responseMap {
-		sign, _ := signedByteSliceToPoint(response.CoSiReponse)
-		if !sign.Equal(ThePairingSuite.G1().Point()) {
+		sign, _ := signedByteSliceToPoint(p.pairingSuite, response.CoSiReponse)
+		if !sign.Equal(p.pairingSuite.G1().Point()) {
 			// Only pass subProtocols that have atleast one valid response in them.
 			runningSubProtocols = append(runningSubProtocols, subProtocol)
 			responses = append(responses, response)

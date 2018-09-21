@@ -9,19 +9,12 @@ import (
 
 	"github.com/dedis/cothority"
 	"github.com/dedis/kyber"
+	"github.com/dedis/kyber/pairing"
 	"github.com/dedis/kyber/pairing/bn256"
-	"github.com/dedis/kyber/sign/bls"
 	"github.com/dedis/kyber/sign/cosi"
-	"github.com/dedis/kyber/util/key"
-	"github.com/dedis/kyber/util/random"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
-	"github.com/dedis/onet/network"
 )
-
-// some ugly global variable holding all the bn256 keypairs. Only to be used for
-// private keys. Will be replaced with services later.
-var globalKeyPairs []key.Pair
 
 // VerificationFn is called on every node. Where msg is the message that is
 // co-signed and the data is additional data for verification.
@@ -30,7 +23,7 @@ type VerificationFn func(msg []byte, data []byte) bool
 // init is done at startup. It defines every messages that is handled by the network
 // and registers the protocols.
 func init() {
-	network.RegisterMessages(Announcement{}, Response{}, Stop{})
+	GlobalRegisterDefaultProtocols()
 }
 
 // BlsFtCosi holds the parameters of the protocol.
@@ -48,27 +41,28 @@ type BlsFtCosi struct {
 	Threshold      int
 	FinalSignature chan []byte // final signature that is sent back to client
 
-	publics         [][]byte // Public keys are marshaled binaries of G2 points
+	PairingPublics  []kyber.Point // Public keys are marshaled binaries of G2 points
+	PairingPublic   kyber.Point   // Public keys are marshaled binaries of G2 points
+	PairingPrivate  kyber.Scalar
 	stoppedOnce     sync.Once
 	subProtocols    []*SubBlsFtCosi
 	startChan       chan bool
 	subProtocolName string
 	verificationFn  VerificationFn
 	suite           cosi.Suite
+	pairingSuite    pairing.Suite
 }
 
 // CreateProtocolFunction is a function type which creates a new protocol
 // used in FtCosi protocol for creating sub leader protocols.
 type CreateProtocolFunction func(name string, t *onet.Tree) (onet.ProtocolInstance, error)
 
-var ThePairingSuite = bn256.NewSuite()
-
 // NewDefaultProtocol is the default protocol function used for registration
 // with an always-true verification.
 // Called by GlobalRegisterDefaultProtocols
 func NewDefaultProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	vf := func(a, b []byte) bool { return true }
-	return NewBlsFtCosi(n, vf, DefaultSubProtocolName, cothority.Suite)
+	return NewBlsFtCosi(n, vf, DefaultSubProtocolName, cothority.Suite, bn256.NewSuite())
 }
 
 // GlobalRegisterDefaultProtocols is used to register the protocols before use,
@@ -79,30 +73,17 @@ func GlobalRegisterDefaultProtocols() {
 }
 
 // NewFtCosi method is used to define the ftcosi protocol.
-func NewBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName string, suite cosi.Suite) (onet.ProtocolInstance, error) {
-
-	// Populate globalKeyPairs. TODO - To be replaced by service later
-	globalKeyPairs = make([]key.Pair, len(n.Roster().List))
-	publics := make([][]byte, len(n.Roster().List))
-	var err error
-	for i, _ := range n.Roster().List {
-		private, public := bls.NewKeyPair(ThePairingSuite, random.New())
-		globalKeyPairs[i] = key.Pair{Private: private, Public: public}
-		publics[i], err = PublicKeyToByteSlice(public)
-		if err != nil {
-			return nil, err
-		}
-	}
+func NewBlsFtCosi(n *onet.TreeNodeInstance, vf VerificationFn, subProtocolName string, suite cosi.Suite, pairingSuite pairing.Suite) (onet.ProtocolInstance, error) {
 
 	c := &BlsFtCosi{
 		TreeNodeInstance: n,
 		FinalSignature:   make(chan []byte, 1),
 		Data:             make([]byte, 0),
-		publics:          publics,
 		startChan:        make(chan bool, 1),
 		verificationFn:   vf,
 		subProtocolName:  subProtocolName,
 		suite:            suite,
+		pairingSuite:     pairingSuite,
 	}
 
 	return c, nil
@@ -171,17 +152,8 @@ func (p *BlsFtCosi) Dispatch() error {
 	}
 	log.Lvl3(p.ServerIdentity().Address, "all protocols started")
 
-	// Unmarshal public keys
-	publics := make([]kyber.Point, len(p.publics))
-	for i, public := range p.publics {
-		publics[i], err = publicByteSliceToPoint(public)
-		if err != nil {
-			return err
-		}
-	}
-
 	// Wait and collect all the signature responses
-	responses, runningSubProtocols, err := p.collectSignatures(trees, p.subProtocols, publics)
+	responses, runningSubProtocols, err := p.collectSignatures(trees, p.subProtocols, p.PairingPublics)
 	if err != nil {
 		return err
 	}
@@ -204,7 +176,7 @@ func (p *BlsFtCosi) Dispatch() error {
 	}
 
 	// generate root signature
-	signaturePoint, finalMask, err := generateSignature(p.TreeNodeInstance, publics, responses, p.Msg, verificationOk)
+	signaturePoint, finalMask, err := generateSignature(p.pairingSuite, p.TreeNodeInstance, p.PairingPublics, p.PairingPrivate, responses, p.Msg, verificationOk)
 	if err != nil {
 		p.FinalSignature <- nil
 		return err
@@ -283,7 +255,6 @@ func (p *BlsFtCosi) startSubProtocol(tree *onet.Tree) (*SubBlsFtCosi, error) {
 		return nil, err
 	}
 	cosiSubProtocol := pi.(*SubBlsFtCosi)
-	cosiSubProtocol.Publics = p.publics
 	cosiSubProtocol.Msg = p.Msg
 	cosiSubProtocol.Data = p.Data
 	cosiSubProtocol.Timeout = p.Timeout / 2
@@ -295,6 +266,9 @@ func (p *BlsFtCosi) startSubProtocol(tree *onet.Tree) (*SubBlsFtCosi, error) {
 	}
 
 	cosiSubProtocol.Threshold = subThreshold
+	cosiSubProtocol.PairingPrivate = p.PairingPrivate
+	cosiSubProtocol.PairingPublic = p.PairingPublic
+	cosiSubProtocol.PairingPublics = p.PairingPublics
 
 	log.Lvl2("Starting sub protocol on", tree)
 	err = cosiSubProtocol.Start()

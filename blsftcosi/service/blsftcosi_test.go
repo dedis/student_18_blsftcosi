@@ -3,23 +3,27 @@ package service
 import (
 	"testing"
 
+	"github.com/dedis/cothority"
+	"github.com/dedis/kyber/pairing/bn256"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"
 	"github.com/stretchr/testify/require"
 )
 
-var tSuite = protocol.ThePairingSuite
+var tSuite = cothority.Suite
+var pairingSuite = bn256.NewSuite()
 
 func TestMain(m *testing.M) {
 	log.MainTest(m)
 }
 
 func TestServiceCosi(t *testing.T) {
+	log.SetDebugVisible(3)
 	local := onet.NewTCPTest(tSuite)
 	// generate 5 hosts, they don't connect, they process messages, and they
 	// don't register the tree or entitylist
-	_, roster, _ := local.GenTree(5, false)
+	servers, roster, _ := local.GenTree(5, false)
 	defer local.CloseAll()
 
 	// Send a request to the service to all hosts
@@ -29,6 +33,7 @@ func TestServiceCosi(t *testing.T) {
 		Roster:  roster,
 		Message: msg,
 	}
+	rootService := local.GetServices(servers, ServiceID)[0].(*Service)
 	for _, dst := range roster.List {
 		reply := &SignatureResponse{}
 		log.Lvl1("Sending request to service...")
@@ -36,7 +41,7 @@ func TestServiceCosi(t *testing.T) {
 		require.Nil(t, err, "Couldn't send")
 
 		// verify the response still
-		require.Nil(t, protocol.Verify(tSuite, roster.Publics(), msg, reply.Signature, protocol.CompletePolicy{}))
+		require.Nil(t, protocol.Verify(pairingSuite, rootService.pairingPublicKeys, msg, reply.Signature, protocol.CompletePolicy{}))
 	}
 }
 
@@ -44,8 +49,9 @@ func TestCreateAggregate(t *testing.T) {
 	local := onet.NewTCPTest(tSuite)
 	// generate 5 hosts, they don't connect, they process messages, and they
 	// don't register the tree or entitylist
-	_, roster, _ := local.GenTree(5, false)
+	servers, roster, _ := local.GenTree(5, false)
 	defer local.CloseAll()
+	rootService := local.GetServices(servers, ServiceID)[0].(*Service)
 
 	// Send a request to the service
 	client := NewClient()
@@ -61,5 +67,5 @@ func TestCreateAggregate(t *testing.T) {
 	require.Nil(t, err, "Couldn't send")
 
 	// verify the response still
-	require.Nil(t, protocol.Verify(tSuite, roster.Publics(), msg, res.Signature, protocol.CompletePolicy{}))
+	require.Nil(t, protocol.Verify(pairingSuite, rootService.pairingPublicKeys, msg, res.Signature, protocol.CompletePolicy{}))
 }

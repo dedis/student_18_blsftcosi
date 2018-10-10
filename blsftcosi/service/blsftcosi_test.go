@@ -33,6 +33,9 @@ func TestServiceCosi(t *testing.T) {
 		Roster:  roster,
 		Message: msg,
 	}
+	for _, service := range local.GetServices(servers, ServiceID) {
+		service.(*Service).Threshold = 5
+	}
 	rootService := local.GetServices(servers, ServiceID)[0].(*Service)
 	for _, dst := range roster.List {
 		reply := &SignatureResponse{}
@@ -42,6 +45,7 @@ func TestServiceCosi(t *testing.T) {
 
 		// verify the response still
 		require.Nil(t, protocol.Verify(pairingSuite, rootService.pairingPublicKeys, msg, reply.Signature, protocol.CompletePolicy{}))
+
 	}
 }
 
@@ -51,6 +55,9 @@ func TestCreateAggregate(t *testing.T) {
 	// don't register the tree or entitylist
 	servers, roster, _ := local.GenTree(5, false)
 	defer local.CloseAll()
+	for _, service := range local.GetServices(servers, ServiceID) {
+		service.(*Service).Threshold = 5
+	}
 	rootService := local.GetServices(servers, ServiceID)[0].(*Service)
 
 	// Send a request to the service

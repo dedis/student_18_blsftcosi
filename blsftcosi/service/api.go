@@ -3,9 +3,9 @@ package service
 import (
 	"errors"
 
+	"github.com/dedis/cothority"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
-	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"
 )
 
 // Client is a structure to communicate with the CoSi
@@ -16,7 +16,7 @@ type Client struct {
 
 // NewClient instantiates a new blsftcosi.Client
 func NewClient() *Client {
-	return &Client{Client: onet.NewClient(protocol.ThePairingSuite, ServiceName)}
+	return &Client{Client: onet.NewClient(cothority.Suite, ServiceName)}
 }
 
 // SignatureRequest sends a CoSi sign request to the Cothority defined by the given

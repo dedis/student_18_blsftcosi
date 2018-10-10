@@ -48,6 +48,8 @@ type Service struct {
 	public            kyber.Point
 	pairingPublicKeys []kyber.Point
 	wg                sync.WaitGroup
+	Threshold         int
+	NSubtrees         int
 }
 
 // SignatureRequest is what the Cosi service is expected to receive from clients.
@@ -97,15 +99,18 @@ func (s *Service) SignatureRequest(req *SignatureRequest) (network.Message, erro
 	p.CreateProtocol = s.CreateProtocol
 	p.Msg = req.Message
 	// We set NSubtrees to the square root of n to evenly distribute the load
-	p.NSubtrees = int(math.Sqrt(float64(nNodes)))
-
-	p.Timeout = time.Second * 5
+	if s.NSubtrees == 0 {
+		p.NSubtrees = int(math.Sqrt(float64(nNodes)))
+	} else {
+		p.NSubtrees = s.NSubtrees
+	}
 	if p.NSubtrees < 1 {
 		p.NSubtrees = 1
 	}
+	p.Timeout = time.Second * 10
 
 	// Complete Threshold
-	p.Threshold = p.Tree().Size()
+	p.Threshold = s.Threshold
 
 	// Set the pairing keys
 	p.PairingPrivate = s.private
@@ -185,6 +190,10 @@ func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfi
 func (s *Service) getPublicKeys(pairingPublics chan []kyber.Point) {
 	s.pairingPublicKeys = <-pairingPublics
 	s.wg.Done()
+}
+
+func (s *Service) GetPairingPublicKeys() []kyber.Point {
+	return s.pairingPublicKeys
 }
 
 func newCoSiService(c *onet.Context) (onet.Service, error) {

@@ -21,20 +21,19 @@ In the Node-method you can read the files that have been created by the
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/dedis/cothority"
-	"github.com/dedis/cothority/ftcosi/protocol"
-	"github.com/dedis/kyber/sign/cosi"
+	"github.com/dedis/kyber/pairing/bn256"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
 	"github.com/dedis/onet/simul/monitor"
+	"github.com/dedis/student_18_blsftcosi/blsftcosi/protocol"
+	"github.com/dedis/student_18_blsftcosi/blsftcosi/service"
 )
 
 func init() {
-	onet.SimulationRegister("ftCosiProtocol", NewSimulationProtocol)
+	onet.SimulationRegister("BlsFtCosiProtocol", NewSimulationProtocol)
 }
 
 // SimulationProtocol implements onet.Simulation.
@@ -58,6 +57,7 @@ func NewSimulationProtocol(config string) (onet.Simulation, error) {
 
 // Setup implements onet.Simulation.
 func (s *SimulationProtocol) Setup(dir string, hosts []string) (*onet.SimulationConfig, error) {
+	log.SetDebugVisible(2)
 	sc := &onet.SimulationConfig{}
 	s.CreateRoster(sc, hosts, 2000)
 	err := s.CreateTree(sc)
@@ -96,7 +96,7 @@ func (s *SimulationProtocol) Node(config *onet.SimulationConfig) error {
 	}
 
 	toIntercept := append(leafsIds, subleadersIds...)
-
+	log.Lvl2("Failing nodes", toIntercept)
 	// intercept announcements on some nodes
 	for _, id := range toIntercept {
 		if id == config.Server.ServerIdentity.ID {
@@ -109,8 +109,8 @@ func (s *SimulationProtocol) Node(config *onet.SimulationConfig) error {
 				}
 
 				switch msg.(type) {
-				case *protocol.Announcement, *protocol.Commitment, *protocol.Challenge, *protocol.Response:
-					log.Lvl3("ignoring ftcosi message")
+				case *protocol.Announcement, *protocol.Response:
+					log.Lvl3("Ignoring blsftcosi message on ", config.Server.ServerIdentity)
 				default:
 					config.Overlay.Process(e)
 				}
@@ -124,44 +124,39 @@ func (s *SimulationProtocol) Node(config *onet.SimulationConfig) error {
 
 // Run implements onet.Simulation.
 func (s *SimulationProtocol) Run(config *onet.SimulationConfig) error {
-	log.SetDebugVisible(2)
 	size := config.Tree.Size()
 	log.Lvl2("Size is:", size, "rounds:", s.Rounds)
 	for round := 0; round < s.Rounds; round++ {
 		log.Lvl1("Starting round", round)
 		round := monitor.NewTimeMeasure("round")
+		blsftcosiService := config.GetService(service.ServiceName).(*service.Service)
+		blsftcosiService.NSubtrees = s.NSubtrees
+		blsftcosiService.Threshold = s.Hosts - s.FailingLeafs - s.FailingSubleaders
 
+		client := service.NewClient()
 		proposal := []byte{0xFF}
-		p, err := config.Overlay.CreateProtocol(protocol.DefaultProtocolName, config.Tree,
-			onet.NilServiceID)
+		serviceReq := &service.SignatureRequest{
+			Roster:  config.Roster,
+			Message: proposal,
+		}
+		serviceReply := &service.SignatureResponse{}
+
+		log.Lvl1("Sending request to service...")
+		err := client.SendProtobuf(config.Server.ServerIdentity, serviceReq, serviceReply)
 		if err != nil {
-			return err
+			return fmt.Errorf("Cannot send:%s", err)
 		}
-		proto := p.(*protocol.FtCosi)
-		proto.NSubtrees = s.NSubtrees
-		proto.Msg = proposal
-		proto.Threshold = s.Hosts - s.FailingLeafs - s.FailingSubleaders
-		// timeouts may need to be modified depending on platform
-		proto.CreateProtocol = func(name string, t *onet.Tree) (onet.ProtocolInstance, error) {
-			return config.Overlay.CreateProtocol(name, t, onet.NilServiceID)
-		}
-		proto.Timeout = 10 * time.Second
-		go func() {
-			log.ErrFatal(p.Start())
-		}()
-		Signature := <-proto.FinalSignature
+
 		round.Record()
 
-		// get public keys
-		publics := config.Roster.Publics()
-
-		// verify signature
-		err = cosi.Verify(cothority.Suite, publics, proposal, Signature, cosi.NewThresholdPolicy(proto.Threshold))
+		pairingSuite := bn256.NewSuite()
+		pairingPublicKeys := blsftcosiService.GetPairingPublicKeys()
+		thresholdPolicy := protocol.NewThresholdPolicy(blsftcosiService.Threshold)
+		err = protocol.Verify(pairingSuite, pairingPublicKeys, proposal, serviceReply.Signature, thresholdPolicy)
 		if err != nil {
 			return fmt.Errorf("error while verifying signature:%s", err)
 		}
 		log.Lvl2("Signature correctly verified!")
-
 	}
 	return nil
 }

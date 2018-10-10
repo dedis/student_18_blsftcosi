@@ -1,4 +1,4 @@
-Simulation = "ftCosiProtocol"
+Simulation = "BlsFtCosiProtocol"
 Servers = 8
 Bf = 4
 Rounds = 1

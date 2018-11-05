@@ -167,7 +167,6 @@ func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfi
 		blskeydist := pi.(*protocol.BlsKeyDist)
 		blskeydist.PairingPublic = s.public
 		blskeydist.Timeout = propagationTimeout
-		s.wg.Add(1)
 		go s.getPublicKeys(blskeydist.PairingPublics)
 		return blskeydist, nil
 	}
@@ -189,6 +188,7 @@ func newCoSiService(c *onet.Context) (onet.Service, error) {
 		suite:            cothority.Suite,
 		pairingSuite:     bn256.NewSuite(),
 	}
+	s.wg.Add(1)
 
 	if err := s.RegisterHandler(s.SignatureRequest); err != nil {
 		log.Error("couldn't register message:", err)
@@ -198,7 +198,7 @@ func newCoSiService(c *onet.Context) (onet.Service, error) {
 	return s, nil
 }
 
-func (s *Service) SetPairingKeys(index int, hosts int) {
+func (s *Service) SetPairingKeys(index int, hosts int, tree *onet.Tree) {
 
 	/*
 		// Generate bn256 keys for the service.
@@ -216,12 +216,10 @@ func (s *Service) SetPairingKeys(index int, hosts int) {
 		}
 		log.Lvl3("Started BlsKG-protocol - waiting for done", len(req.Roster.List))
 
-		s.wg.Add(1)
 		go s.getPublicKeys(blskeydist.PairingPublics)
 	*/
 
 	// set keys using seed
-	s.wg.Add(1)
 	stream := deterstream{0}
 	publicKeys := make([]kyber.Point, hosts)
 	for i := 0; i < hosts; i++ {

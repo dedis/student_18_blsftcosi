@@ -64,6 +64,12 @@ func (s *SimulationProtocol) Setup(dir string, hosts []string) (*onet.Simulation
 	if err != nil {
 		return nil, err
 	}
+	/*
+		serviceIndex, _ := sc.Roster.Search(sc.Server.ServerIdentity.ID)
+		blsftcosiService := sc.GetService(service.ServiceName).(*service.Service)
+		blsftcosiService.SetPairingKeys(serviceIndex, host, sc.Roster)
+
+	*/
 	return sc, nil
 }
 
@@ -77,9 +83,11 @@ func (s *SimulationProtocol) Node(config *onet.SimulationConfig) error {
 		log.Fatal("Didn't find this node in roster")
 	}
 
+	///*
 	serviceIndex, _ := config.Roster.Search(config.Server.ServerIdentity.ID)
 	blsftcosiService := config.GetService(service.ServiceName).(*service.Service)
-	blsftcosiService.SetPairingKeys(serviceIndex, s.Hosts)
+	blsftcosiService.SetPairingKeys(serviceIndex, s.Hosts, config.Tree)
+	//*/
 
 	// get subleader ids
 	subleadersIds, err := protocol.GetSubleaderIDs(config.Tree, 0, s.Hosts, s.NSubtrees)

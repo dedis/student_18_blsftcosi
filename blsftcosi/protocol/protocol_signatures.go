@@ -83,7 +83,7 @@ func (p *BlsFtCosi) collectSignatures(trees []*onet.Tree,
 	}
 
 	// handle answers from all parallel threads
-	sharedMask, err := NewMask(p.pairingSuite, publics, nil)
+	sharedMask, err := NewMask(p.pairingSuite, publics, -1)
 	if err != nil {
 		close(closingChan)
 		return nil, nil, err

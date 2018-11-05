@@ -19,24 +19,17 @@ type Mask struct {
 // cosigners are disabled by default. If a public key is given it verifies that
 // it is present in the list of keys and sets the corresponding index in the
 // bitmask to 1 (enabled).
-func NewMask(suite pairing.Suite, publics []kyber.Point, myKey kyber.Point) (*Mask, error) {
+func NewMask(suite pairing.Suite, publics []kyber.Point, myKey int) (*Mask, error) {
 	m := &Mask{
 		publics: publics,
 	}
 	m.mask = make([]byte, m.Len())
 	m.AggregatePublic = suite.G2().Point().Null()
-	if myKey != nil {
-		found := false
-		for i, key := range publics {
-			if key.Equal(myKey) {
-				m.SetBit(i, true)
-				found = true
-				break
-			}
-		}
-		if !found {
+	if myKey != -1 {
+		if myKey > len(publics) {
 			return nil, errors.New("key not found")
 		}
+		m.SetBit(myKey, true)
 	}
 	return m, nil
 }

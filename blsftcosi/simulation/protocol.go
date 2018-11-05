@@ -77,6 +77,10 @@ func (s *SimulationProtocol) Node(config *onet.SimulationConfig) error {
 		log.Fatal("Didn't find this node in roster")
 	}
 
+	serviceIndex, _ := config.Roster.Search(config.Server.ServerIdentity.ID)
+	blsftcosiService := config.GetService(service.ServiceName).(*service.Service)
+	blsftcosiService.SetPairingKeys(serviceIndex, s.Hosts)
+
 	// get subleader ids
 	subleadersIds, err := protocol.GetSubleaderIDs(config.Tree, 0, s.Hosts, s.NSubtrees)
 	if err != nil {

@@ -33,8 +33,9 @@ func TestServiceCosi(t *testing.T) {
 		Roster:  roster,
 		Message: msg,
 	}
-	for _, service := range local.GetServices(servers, ServiceID) {
+	for i, service := range local.GetServices(servers, ServiceID) {
 		service.(*Service).Threshold = 5
+		service.(*Service).SetPairingKeys(i, 5)
 	}
 	rootService := local.GetServices(servers, ServiceID)[0].(*Service)
 	for _, dst := range roster.List {
@@ -55,8 +56,9 @@ func TestCreateAggregate(t *testing.T) {
 	// don't register the tree or entitylist
 	servers, roster, _ := local.GenTree(5, false)
 	defer local.CloseAll()
-	for _, service := range local.GetServices(servers, ServiceID) {
+	for i, service := range local.GetServices(servers, ServiceID) {
 		service.(*Service).Threshold = 5
+		service.(*Service).SetPairingKeys(i, 5)
 	}
 	rootService := local.GetServices(servers, ServiceID)[0].(*Service)
 

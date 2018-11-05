@@ -201,7 +201,7 @@ loop:
 			nodesCanRespond = remove(nodesCanRespond, response.TreeNode)
 
 			// verify mask of the received response
-			verificationMask, err := NewMask(p.pairingSuite, p.PairingPublics, nil)
+			verificationMask, err := NewMask(p.pairingSuite, p.PairingPublics, -1)
 			if err != nil {
 				return err
 			}
@@ -390,7 +390,7 @@ func (p *SubBlsFtCosi) Start() error {
 // Returns the response and an error if there was a problem in the process.
 func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point, private kyber.Scalar) (StructResponse, error) {
 
-	personalMask, err := NewMask(p.pairingSuite, publics, nil)
+	personalMask, err := NewMask(p.pairingSuite, publics, -1)
 	if err != nil {
 		return StructResponse{}, err
 	}
@@ -403,7 +403,7 @@ func (p *SubBlsFtCosi) getResponse(accepts bool, publics []kyber.Point, private 
 	Refusals := make(map[int][]byte)
 
 	if accepts {
-		personalMask, err = NewMask(p.pairingSuite, publics, p.PairingPublic)
+		personalMask, err = NewMask(p.pairingSuite, publics, p.Index())
 		if err != nil {
 			return StructResponse{}, err
 		}

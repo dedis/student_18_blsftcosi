@@ -190,7 +190,7 @@ func TestProtocolQuickAnswer(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			mask, err := NewMask(cosiProtocol.pairingSuite, cosiProtocol.PairingPublics, nil)
+			mask, err := NewMask(cosiProtocol.pairingSuite, cosiProtocol.PairingPublics, -1)
 			require.Nil(t, err)
 			lenRes := cosiProtocol.pairingSuite.G1().PointLen()
 			mask.SetMask(sig[lenRes:])

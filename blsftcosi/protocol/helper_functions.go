@@ -40,20 +40,11 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 	}
 
 	//generate personal mask
-	public := publics[t.Index()]
-	personalMask, err := NewMask(ps, publics, public)
-
-	if !ok {
-		var found bool
-		for i, p := range publics {
-			if p.Equal(public) {
-				personalMask.SetBit(i, false)
-				found = true
-			}
-		}
-		if !found {
-			return nil, nil, errors.New("failed to find own public key")
-		}
+	var personalMask *Mask
+	if ok {
+		personalMask, _ = NewMask(ps, publics, t.Index())
+	} else {
+		personalMask, _ = NewMask(ps, publics, -1)
 	}
 
 	masks = append(masks, personalMask.Mask())
@@ -79,7 +70,7 @@ func generateSignature(ps pairing.Suite, t *onet.TreeNodeInstance, publics []kyb
 	}
 
 	//create final aggregated mask
-	finalMask, err := NewMask(ps, publics, nil)
+	finalMask, err := NewMask(ps, publics, -1)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -168,7 +159,7 @@ func aggregateResponses(ps pairing.Suite, publics []kyber.Point,
 	}
 
 	// create final aggregated mask
-	finalMask, err := NewMask(ps, publics, nil)
+	finalMask, err := NewMask(ps, publics, -1)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -231,7 +222,7 @@ func Verify(ps pairing.Suite, publics []kyber.Point, message, sig []byte, policy
 	signature := sig[:lenCom]
 
 	// Unpack the participation mask and get the aggregate public key
-	mask, err := NewMask(ps, publics, nil)
+	mask, err := NewMask(ps, publics, -1)
 	if err != nil {
 		return err
 	}
